@@ -6,7 +6,7 @@ A shared memory backend for my AI personal assistant of choice. One source of tr
 
 Pando exposes a personal context store (projects, tasks, preferences, notes) as an MCP server, so any connected AI surface can read and write the same state.
 
-See [`design.md`](./design.md) for the full architecture.
+See [`design.md`](DESIGN.md) for the full architecture.
 
 ## Status
 

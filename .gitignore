@@ -15,3 +15,6 @@ target
 
 # Added by cargo
 /target
+
+# Environment Variables
+.env

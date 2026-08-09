@@ -33,12 +33,16 @@ All three clients call the same MCP tools against the same database. No sync, no
 |----------------|----------------------------------------------------------------------|------------------------------------------------------------------------------|
 | subjects       | Anchors for projects, ongoing focuses, and relationships             | slug, title, category, status, summary, updated_at, updated_by              |
 | memory_entries | Durable context the AI reads to stay consistent, with per-subject overrides | id, scope, key, subject_id, description, content, updated_at, updated_by |
-| tasks          | Cross-surface action items                                          | id, source, status, linked_subject, text                                    |
+| tasks          | Cross-surface action items                                          | id, text, status, priority, linked_subject, due_date, source, created_at, completed_at, updated_at, updated_by |
 
-`subjects` and `memory_entries` are finalized — see
-`migrations/0001_create_subjects.up.sql` and
-`migrations/0002_create_memory_entries.up.sql` for the real DDL. `tasks` is
-still draft; flesh out before writing its migration.
+All three tables are finalized — see `migrations/0001_create_subjects.up.sql`,
+`migrations/0002_create_memory_entries.up.sql`, and
+`migrations/0003_create_tasks.up.sql` for the real DDL.
+
+Recurring/habit-style tasks were deliberately scoped out of `tasks` — planned
+as a separate `habits` + `habit_completions` pair later, since a recurring
+definition with a completion history is a different shape than a one-off
+task.
 
 Replaces the original draft's separate `profile`, `areas`, `topics`, and
 `people` tables — those are now `memory_entries` rows (optionally scoped to

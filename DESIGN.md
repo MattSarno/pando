@@ -29,17 +29,20 @@ All three clients call the same MCP tools against the same database. No sync, no
 
 ## 5. Schema
 
-| Table       | Purpose                                | Key fields (draft)                       |
-|-------------|----------------------------------------|------------------------------------------|
-| profile     | Stable identity facts                  | key, value, updated_at                   |
-| areas       | Active projects, keyed by slug         | slug, title, status, context, updated_at |
-| topics      | Durable patterns/preferences by domain | domain, key, value                       |
-| people      | Relationship context                   | name, relationship, notes                |
-| tasks       | Cross-surface action items             | id, source, status, linked_area, text    |
-| preferences | Behavioral preferences for Claude      | key, value                               |
+| Table          | Purpose                                                             | Key fields                                                                  |
+|----------------|----------------------------------------------------------------------|------------------------------------------------------------------------------|
+| subjects       | Anchors for projects, ongoing focuses, and relationships             | slug, title, category, status, summary, updated_at, updated_by              |
+| memory_entries | Durable context the AI reads to stay consistent, with per-subject overrides | id, scope, key, subject_id, description, content, updated_at, updated_by |
+| tasks          | Cross-surface action items                                          | id, source, status, linked_subject, text                                    |
 
-(This is a draft shape, not final DDL — flesh out per-table before writing
-migrations.)
+`subjects` and `memory_entries` are finalized — see
+`migrations/0001_create_subjects.up.sql` and
+`migrations/0002_create_memory_entries.up.sql` for the real DDL. `tasks` is
+still draft; flesh out before writing its migration.
+
+Replaces the original draft's separate `profile`, `areas`, `topics`, and
+`people` tables — those are now `memory_entries` rows (optionally scoped to
+a `subjects` row via `subject_id`) rather than distinct tables.
 
 ## 6. MCP Tool Contract
 

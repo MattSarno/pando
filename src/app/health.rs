@@ -1,4 +1,4 @@
-use crate::AppState;
+use crate::app::AppState;
 use axum::{extract::State, http::StatusCode};
 
 pub async fn health_check(State(state): State<AppState>) -> StatusCode {

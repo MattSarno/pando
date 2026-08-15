@@ -1,8 +1,6 @@
-mod health;
-
-use crate::AppState;
+use crate::app::AppState;
+use crate::app::health::health_check;
 use axum::{Router, routing::get};
-use health::health_check;
 
 pub fn router() -> Router<AppState> {
     Router::new().route("/health", get(health_check))

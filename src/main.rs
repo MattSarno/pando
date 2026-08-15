@@ -1,11 +1,5 @@
-mod routes;
-
-use sqlx::{Pool, Postgres, postgres::PgPoolOptions};
-
-#[derive(Clone)]
-struct AppState {
-    database_pool: Pool<Postgres>,
-}
+use pando::app::{AppState, routes};
+use sqlx::postgres::PgPoolOptions;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

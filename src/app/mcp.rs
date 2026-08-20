@@ -1,25 +1,25 @@
 use super::AppState;
-use rmcp::{
-    ServerHandler, 
-    handler::server::tool::ToolRouter, 
-    tool_handler, 
-    tool_router,
-};
+use rmcp::{ServerHandler, handler::server::tool::ToolRouter, tool_handler};
+use sqlx::PgPool;
 
+#[derive(Debug)]
 pub struct PandoTools {
     state: AppState,
     tool_router: ToolRouter<PandoTools>,
 }
 
-#[tool_router]
 impl PandoTools {
     pub fn new(state: AppState) -> Self {
         Self {
             state,
-            tool_router: Self::tool_router(),
+            tool_router: Self::subjects_router(),
         }
+    }
+
+    pub fn database_pool(&self) -> &PgPool {
+        &self.state.database_pool
     }
 }
 
-#[tool_handler]
+#[tool_handler(router = self.tool_router)]
 impl ServerHandler for PandoTools {}

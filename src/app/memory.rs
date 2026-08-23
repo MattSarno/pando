@@ -95,6 +95,14 @@ impl PandoTools {
             }
         }
 
+        if body.content.trim().is_empty() {
+            return Ok(error_result("content must not be empty"));
+        }
+
+        if body.description.trim().is_empty() {
+            return Ok(error_result("description must not be empty"));
+        }
+
         let result = sqlx::query_as::<_, MemoryEntry>(
             "INSERT INTO memory_entries (scope, key, subject_id, description, content, updated_by)
             VALUES ($1, $2, $3, $4, $5, $6)
@@ -161,7 +169,7 @@ impl PandoTools {
     ) -> Result<CallToolResult, ErrorData> {
         let query = body.query.trim();
         if query.is_empty() {
-            return Ok(error_result("Query must not be empty"));
+            return Ok(error_result("query must not be empty"));
         }
 
         let pattern = format!("%{}%", escape_like_wildcards(&query));
@@ -215,6 +223,18 @@ impl PandoTools {
             return Ok(error_result(
                 "At least one of content or description must be provided",
             ));
+        }
+
+        if let Some(content) = body.content.as_deref() {
+            if content.trim().is_empty() {
+                return Ok(error_result("content must not be empty"));
+            }
+        }
+
+        if let Some(description) = body.description.as_deref() {
+            if description.trim().is_empty() {
+                return Ok(error_result("description must not be empty"));
+            }
         }
 
         let result = sqlx::query_as::<_, MemoryEntry>(

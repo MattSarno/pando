@@ -100,7 +100,12 @@ impl PandoTools {
             return Ok(error_result(message));
         }
 
+        if body.title.trim().is_empty() {
+            return Ok(error_result("title must not be empty"));
+        }
+
         let status = default_status(&body.category);
+        let summary = body.summary.filter(|summary| !summary.trim().is_empty());
         let result = sqlx::query_as::<_, Subject>(
             "INSERT INTO subjects (slug, title, category, status, summary, updated_by)
             VALUES ($1, $2, $3, $4, $5, $6)
@@ -110,7 +115,7 @@ impl PandoTools {
         .bind(&body.title)
         .bind(&body.category)
         .bind(&status)
-        .bind(&body.summary)
+        .bind(&summary)
         .bind(&body.updated_by)
         .fetch_one(self.database_pool())
         .await;
@@ -160,6 +165,12 @@ impl PandoTools {
             ));
         }
 
+        if let Some(title) = body.title.as_deref() {
+            if title.trim().is_empty() {
+                return Ok(error_result("title must not be empty"));
+            }
+        }
+
         if let Some(new_status) = &body.status {
             let category = match sqlx::query_scalar::<_, Category>(
                 "SELECT category FROM subjects WHERE slug = $1",
@@ -185,7 +196,7 @@ impl PandoTools {
         }
 
         let summary_provided = body.summary.is_some();
-        let new_summary = body.summary.filter(|summary| !summary.is_empty());
+        let summary = body.summary.filter(|summary| !summary.trim().is_empty());
         let result = sqlx::query_as::<_, Subject>(
             "UPDATE subjects
              SET title = COALESCE($2, title),
@@ -200,7 +211,7 @@ impl PandoTools {
         .bind(&body.title)
         .bind(&body.status)
         .bind(summary_provided)
-        .bind(&new_summary)
+        .bind(&summary)
         .bind(&body.updated_by)
         .fetch_optional(self.database_pool())
         .await;

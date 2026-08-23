@@ -130,7 +130,7 @@ impl PandoTools {
                     "a memory entry already exists for this scope/key/subject",
                 ))
             }
-            Err(error) => Err(db_error("Failed to create new memory", error)),
+            Err(error) => Err(db_error("failed to create new memory", error)),
         }
     }
 
@@ -158,7 +158,7 @@ impl PandoTools {
         match result {
             Ok(Some(memory)) => Ok(CallToolResult::structured(json!(memory))),
             Ok(None) => Ok(CallToolResult::structured(json!(null))),
-            Err(error) => Err(db_error("Failed to read memory entry", error)),
+            Err(error) => Err(db_error("failed to read memory entry", error)),
         }
     }
 
@@ -188,7 +188,7 @@ impl PandoTools {
 
         match result {
             Ok(memories) => Ok(CallToolResult::structured(json!(memories))),
-            Err(error) => Err(db_error("Failed to read memory entries", error)),
+            Err(error) => Err(db_error("failed to read memory entries", error)),
         }
     }
 
@@ -210,7 +210,7 @@ impl PandoTools {
 
         match result {
             Ok(memories) => Ok(CallToolResult::structured(json!(memories))),
-            Err(error) => Err(db_error("Failed to read memory entries", error)),
+            Err(error) => Err(db_error("failed to read memory entries", error)),
         }
     }
 
@@ -262,7 +262,7 @@ impl PandoTools {
             Ok(None) => Ok(error_result(
                 "no memory entry exists for that scope/key/subject",
             )),
-            Err(error) => Err(db_error("Failed to update memory entry", error)),
+            Err(error) => Err(db_error("failed to update memory entry", error)),
         }
     }
 
@@ -285,7 +285,7 @@ impl PandoTools {
 
         let deleted = match result {
             Ok(deleted) => deleted,
-            Err(error) => return Err(db_error("Failed to delete memory entry", error)),
+            Err(error) => return Err(db_error("failed to delete memory entry", error)),
         };
 
         if deleted.rows_affected() == 0 {

@@ -85,12 +85,12 @@ impl PandoTools {
         &self,
         Parameters(body): Parameters<MemoryCreateParams>,
     ) -> Result<CallToolResult, ErrorData> {
-        if let Err(message) = validate_key(&body.key) {
+        if let Err(message) = validate_key("key", &body.key) {
             return Ok(error_result(message));
         }
 
         if let Some(subject_id) = body.subject_id.as_deref() {
-            if let Err(message) = validate_key(subject_id) {
+            if let Err(message) = validate_key("subject_id", subject_id) {
                 return Ok(error_result(message));
             }
         }

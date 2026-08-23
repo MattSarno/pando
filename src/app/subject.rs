@@ -96,7 +96,7 @@ impl PandoTools {
         &self,
         Parameters(body): Parameters<SubjectCreateParams>,
     ) -> Result<CallToolResult, ErrorData> {
-        if let Err(message) = validate_key(&body.slug) {
+        if let Err(message) = validate_key("slug", &body.slug) {
             return Ok(error_result(message));
         }
 

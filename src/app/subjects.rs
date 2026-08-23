@@ -128,7 +128,7 @@ impl PandoTools {
             {
                 Ok(error_result(format!("slug '{}' already exists", body.slug)))
             }
-            Err(error) => Err(db_error("Failed to create subject", error)),
+            Err(error) => Err(db_error("failed to create subject", error)),
         }
     }
 
@@ -150,7 +150,7 @@ impl PandoTools {
 
         match result {
             Ok(subjects) => Ok(CallToolResult::structured(json!(subjects))),
-            Err(error) => Err(db_error("Failed to list subjects", error)),
+            Err(error) => Err(db_error("failed to list subjects", error)),
         }
     }
 
@@ -180,7 +180,7 @@ impl PandoTools {
             .await
             {
                 Ok(category) => category,
-                Err(error) => return Err(db_error("Failed to look up subject", error)),
+                Err(error) => return Err(db_error("failed to look up subject", error)),
             };
 
             let category = match category {
@@ -219,7 +219,7 @@ impl PandoTools {
         match result {
             Ok(Some(subject)) => Ok(CallToolResult::structured(json!(subject))),
             Ok(None) => Ok(error_result(format!("slug '{}' does not exist", body.slug))),
-            Err(error) => Err(db_error("Failed to update subject", error)),
+            Err(error) => Err(db_error("failed to update subject", error)),
         }
     }
 
@@ -230,7 +230,7 @@ impl PandoTools {
     ) -> Result<CallToolResult, ErrorData> {
         let mut transaction = match self.database_pool().begin().await {
             Ok(transaction) => transaction,
-            Err(error) => return Err(db_error("Failed to start transaction", error)),
+            Err(error) => return Err(db_error("failed to start transaction", error)),
         };
 
         if let Err(error) = sqlx::query("DELETE FROM memory_entries WHERE subject_id = $1")
@@ -238,7 +238,7 @@ impl PandoTools {
             .execute(&mut *transaction)
             .await
         {
-            return Err(db_error("Failed to delete subject's memory", error));
+            return Err(db_error("failed to delete subject's memory", error));
         }
 
         let result = sqlx::query("DELETE FROM subjects WHERE slug = $1")
@@ -248,7 +248,7 @@ impl PandoTools {
 
         let deleted = match result {
             Ok(deleted) => deleted,
-            Err(error) => return Err(db_error("Failed to delete subject", error)),
+            Err(error) => return Err(db_error("failed to delete subject", error)),
         };
 
         if deleted.rows_affected() == 0 {
@@ -256,7 +256,7 @@ impl PandoTools {
         }
 
         if let Err(error) = transaction.commit().await {
-            return Err(db_error("Failed to commit transaction", error));
+            return Err(db_error("failed to commit transaction", error));
         }
 
         Ok(CallToolResult::structured(json!({ "deleted": body.slug })))

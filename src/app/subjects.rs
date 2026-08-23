@@ -80,10 +80,10 @@ fn default_status(category: &Category) -> Option<Status> {
 fn validate_status_for_category(status: &Status, category: &Category) -> Result<(), String> {
     match (category, status) {
         (Category::Relationship, _) => {
-            Err("Relationship subjects cannot have a status".to_string())
+            Err("relationship subjects cannot have a status".to_string())
         }
         (Category::Focus, Status::Finished) => {
-            Err("Focus subjects cannot have status 'finished'".to_string())
+            Err("focus subjects cannot have status 'finished'".to_string())
         }
         _ => Ok(()),
     }
@@ -126,7 +126,7 @@ impl PandoTools {
                 if db_err.is_unique_violation()
                     && db_err.constraint() == Some(SLUG_PKEY_CONSTRAINT) =>
             {
-                Ok(error_result(format!("Slug '{}' already exists", body.slug)))
+                Ok(error_result(format!("slug '{}' already exists", body.slug)))
             }
             Err(error) => Err(db_error("Failed to create subject", error)),
         }
@@ -161,7 +161,7 @@ impl PandoTools {
     ) -> Result<CallToolResult, ErrorData> {
         if body.title.is_none() && body.status.is_none() && body.summary.is_none() {
             return Ok(error_result(
-                "At least one of title, status, or summary must be provided",
+                "at least one of title, status, or summary must be provided",
             ));
         }
 
@@ -186,7 +186,7 @@ impl PandoTools {
             let category = match category {
                 Some(category) => category,
                 None => {
-                    return Ok(error_result(format!("Slug '{}' does not exist", body.slug)));
+                    return Ok(error_result(format!("slug '{}' does not exist", body.slug)));
                 }
             };
 
@@ -218,7 +218,7 @@ impl PandoTools {
 
         match result {
             Ok(Some(subject)) => Ok(CallToolResult::structured(json!(subject))),
-            Ok(None) => Ok(error_result(format!("Slug '{}' does not exist", body.slug))),
+            Ok(None) => Ok(error_result(format!("slug '{}' does not exist", body.slug))),
             Err(error) => Err(db_error("Failed to update subject", error)),
         }
     }
@@ -252,7 +252,7 @@ impl PandoTools {
         };
 
         if deleted.rows_affected() == 0 {
-            return Ok(error_result(format!("Slug '{}' does not exist", body.slug)));
+            return Ok(error_result(format!("slug '{}' does not exist", body.slug)));
         }
 
         if let Err(error) = transaction.commit().await {

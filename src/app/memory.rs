@@ -127,7 +127,7 @@ impl PandoTools {
                     ) =>
             {
                 Ok(error_result(
-                    "A memory entry already exists for this scope/key/subject",
+                    "a memory entry already exists for this scope/key/subject",
                 ))
             }
             Err(error) => Err(db_error("Failed to create new memory", error)),
@@ -221,7 +221,7 @@ impl PandoTools {
     ) -> Result<CallToolResult, ErrorData> {
         if body.content.is_none() && body.description.is_none() {
             return Ok(error_result(
-                "At least one of content or description must be provided",
+                "at least one of content or description must be provided",
             ));
         }
 
@@ -260,7 +260,7 @@ impl PandoTools {
         match result {
             Ok(Some(memory)) => Ok(CallToolResult::structured(json!(memory))),
             Ok(None) => Ok(error_result(
-                "No memory entry exists for that scope/key/subject",
+                "no memory entry exists for that scope/key/subject",
             )),
             Err(error) => Err(db_error("Failed to update memory entry", error)),
         }
@@ -290,7 +290,7 @@ impl PandoTools {
 
         if deleted.rows_affected() == 0 {
             return Ok(error_result(
-                "No memory entry exists for that scope/key/subject",
+                "no memory entry exists for that scope/key/subject",
             ));
         }
 

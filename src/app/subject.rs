@@ -259,6 +259,8 @@ impl PandoTools {
             return Err(db_error("failed to commit transaction", error));
         }
 
-        Ok(CallToolResult::structured(json!({ "deleted": body.slug })))
+        Ok(CallToolResult::structured(
+            json!({ "deleted": { "slug": body.slug } }),
+        ))
     }
 }

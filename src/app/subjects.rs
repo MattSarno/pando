@@ -1,5 +1,6 @@
 use crate::app::mcp::PandoTools;
 use crate::app::tool_errors::{db_error, error_result};
+use crate::app::validation::validate_key;
 use rmcp::{
     ErrorData, handler::server::wrapper::Parameters, model::CallToolResult, serde_json::json, tool,
     tool_router,
@@ -69,28 +70,6 @@ struct SubjectUpdateParams {
     updated_by: String,
 }
 
-fn validate_slug(slug: &str) -> Result<(), String> {
-    let slices = slug.split('-');
-    for slice in slices {
-        if slice.is_empty() {
-            return Err(
-                "slug must not be empty and must not have leading, trailing, or double hyphens"
-                    .to_string(),
-            );
-        }
-
-        for character in slice.chars() {
-            if !character.is_ascii_lowercase() && !character.is_ascii_digit() {
-                return Err(format!(
-                    "slug segment '{slice}' is invalid — only lowercase letters and digits are allowed"
-                ));
-            }
-        }
-    }
-
-    Ok(())
-}
-
 fn default_status(category: &Category) -> Option<Status> {
     match category {
         Category::Relationship => None,
@@ -117,7 +96,7 @@ impl PandoTools {
         &self,
         Parameters(body): Parameters<SubjectCreateParams>,
     ) -> Result<CallToolResult, ErrorData> {
-        if let Err(message) = validate_slug(&body.slug) {
+        if let Err(message) = validate_key(&body.slug) {
             return Ok(error_result(message));
         }
 

@@ -4,7 +4,7 @@ pub mod routes;
 mod mcp;
 mod memory;
 mod state;
-mod subjects;
+mod subject;
 mod tool_errors;
 mod validation;
 

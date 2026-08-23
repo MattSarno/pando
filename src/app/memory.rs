@@ -130,6 +130,15 @@ impl PandoTools {
                     "a memory entry already exists for this scope/key/subject",
                 ))
             }
+            Err(sqlx::Error::Database(db_err))
+                if db_err.is_foreign_key_violation()
+                    && db_err.constraint() == Some("memory_entries_subject_id_fkey") =>
+            {
+                Ok(error_result(format!(
+                    "subject '{}' does not exist",
+                    body.subject_id.unwrap_or_default()
+                )))
+            }
             Err(error) => Err(db_error("failed to create new memory", error)),
         }
     }

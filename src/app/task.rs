@@ -8,7 +8,7 @@ use sqlx::PgPool;
 use sqlx::types::time::{Date, OffsetDateTime};
 use time::format_description::well_known::Iso8601;
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema, sqlx::Type)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, sqlx::Type)]
 #[serde(rename_all = "lowercase")]
 #[sqlx(type_name = "text", rename_all = "lowercase")]
 enum Status {
@@ -17,7 +17,7 @@ enum Status {
     Done,
 }
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema, sqlx::Type)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, sqlx::Type)]
 #[serde(rename_all = "lowercase")]
 #[sqlx(type_name = "text", rename_all = "lowercase")]
 enum Priority {
@@ -58,7 +58,7 @@ struct TaskListParams {
     linked_subject: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema, sqlx::Type)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, sqlx::Type)]
 #[serde(rename_all = "lowercase")]
 #[sqlx(type_name = "text", rename_all = "lowercase")]
 enum UpdatableStatus {

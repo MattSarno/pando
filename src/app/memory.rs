@@ -9,7 +9,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sqlx::types::time::OffsetDateTime;
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema, sqlx::Type)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, sqlx::Type)]
 #[serde(rename_all = "lowercase")]
 #[sqlx(type_name = "text", rename_all = "lowercase")]
 enum Scope {

@@ -95,9 +95,12 @@ Enforced wherever `key` is written (`memory_write`).
     `subject_update` for that after creation.
   - Duplicate `slug` is a hard error, not an upsert — use `subject_update`
     to change an existing subject.
-- `subject_list(category?, status?)` → matching rows, ordered `updated_at
-  desc` (whatever you're actively working on surfaces first — same ordering
-  as `task_list`).
+- `subject_list(slug?, category?, status?)` → matching rows, ordered
+  `updated_at desc` (whatever you're actively working on surfaces first —
+  same ordering as `task_list`). `slug` is a strict equality filter, not a
+  search — there's no dedicated `subject_read`, so this doubles as the
+  point-lookup-by-slug path rather than adding a separate single-row tool
+  for it.
 - `subject_update(slug, title?, status?, summary?, updated_by)` → updated row.
   - `category` is immutable after creation — it determines which `status`
     values are legal, so changing it would require re-validating status too;

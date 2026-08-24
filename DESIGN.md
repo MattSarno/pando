@@ -196,8 +196,11 @@ Enforced wherever `key` is written (`memory_write`).
   - For fixing mistakes (junk/duplicate/accidentally-created tasks) — not
     an alternative to `task_complete`, which already covers anything
     genuinely finished and preserves it as history.
-- `task_list(status?, stale_days?, linked_subject?)` → matching rows,
-  ordered `updated_at desc`. `stale_days` is independent of `status` — it
+- `task_list(id?, status?, stale_days?, linked_subject?)` → matching rows,
+  ordered `updated_at desc`. `id` is a strict equality filter — same
+  point-lookup reasoning as `subject_list`'s `slug`, no dedicated
+  `task_read` since `task_update`/`task_complete`/`task_delete` already
+  return the full row on mutation. `stale_days` is independent of `status` — it
   only means `updated_at` older than `now() - stale_days`, ANDed with
   whatever `status`/`linked_subject` filters are also given. Want old open
   work? Pass `status: 'open', stale_days: 30`. Want old completed tasks for

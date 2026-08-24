@@ -11,7 +11,7 @@ use sqlx::types::time::OffsetDateTime;
 
 const SLUG_PKEY_CONSTRAINT: &str = "subjects_pkey";
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema, sqlx::Type)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, sqlx::Type)]
 #[serde(rename_all = "lowercase")]
 #[sqlx(type_name = "text", rename_all = "lowercase")]
 enum Category {
@@ -20,7 +20,7 @@ enum Category {
     Relationship,
 }
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema, sqlx::Type)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, sqlx::Type)]
 #[serde(rename_all = "lowercase")]
 #[sqlx(type_name = "text", rename_all = "lowercase")]
 enum Status {

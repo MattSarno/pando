@@ -5,6 +5,7 @@ mod mcp;
 mod memory;
 mod state;
 mod subject;
+mod task;
 mod tool_errors;
 mod validation;
 

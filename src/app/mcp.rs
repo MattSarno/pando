@@ -12,7 +12,7 @@ impl PandoTools {
     pub fn new(state: AppState) -> Self {
         Self {
             state,
-            tool_router: Self::subjects_router() + Self::memory_router(),
+            tool_router: Self::subjects_router() + Self::memory_router() + Self::tasks_router(),
         }
     }
 

@@ -51,6 +51,7 @@ struct SubjectCreateParams {
 
 #[derive(Deserialize, JsonSchema)]
 struct SubjectListParams {
+    slug: Option<String>,
     category: Option<Category>,
     status: Option<Status>,
 }
@@ -132,17 +133,19 @@ impl PandoTools {
         }
     }
 
-    #[tool(description = "List subjects, optionally filtered by category and/or status")]
+    #[tool(description = "List subjects, optionally filtered by slug, category, and/or status")]
     async fn subject_list(
         &self,
         Parameters(body): Parameters<SubjectListParams>,
     ) -> Result<CallToolResult, ErrorData> {
         let result = sqlx::query_as::<_, Subject>(
             "SELECT * FROM subjects
-             WHERE ($1::text IS NULL OR category = $1)
-               AND ($2::text IS NULL OR status = $2)
+             WHERE ($1::text IS NULL OR slug = $1)
+               AND ($2::text IS NULL OR category = $2)
+               AND ($3::text IS NULL OR status = $3)
              ORDER BY updated_at DESC",
         )
+        .bind(&body.slug)
         .bind(&body.category)
         .bind(&body.status)
         .fetch_all(self.database_pool())

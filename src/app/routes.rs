@@ -1,4 +1,4 @@
-use crate::app::health::health_check;
+use crate::app::web::health::health_check;
 use crate::app::{AppState, mcp::PandoTools};
 use axum::{Router, routing::get};
 use rmcp::transport::streamable_http_server::{

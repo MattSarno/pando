@@ -1,6 +1,6 @@
 use crate::app::mcp::PandoTools;
-use crate::app::tool_errors::{db_error, error_result};
-use crate::app::validation::validate_key;
+use crate::app::mcp::tool_errors::{db_error, error_result};
+use crate::app::mcp::validation::validate_key;
 use rmcp::{
     ErrorData, handler::server::wrapper::Parameters, model::CallToolResult, serde_json::json, tool,
     tool_router,

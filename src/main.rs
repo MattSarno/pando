@@ -11,7 +11,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .connect(&database_url)
         .await?;
 
-    let app_state = AppState { database_pool };
+    let public_base_url =
+        std::env::var("PUBLIC_BASE_URL").map_err(|_| "PUBLIC_BASE_URL must be set")?;
+
+    let app_state = AppState {
+        database_pool,
+        public_base_url,
+    };
     let app = routes::router(app_state);
 
     let listener = tokio::net::TcpListener::bind(host_url).await?;

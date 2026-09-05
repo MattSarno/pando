@@ -14,9 +14,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let public_base_url =
         std::env::var("PUBLIC_BASE_URL").map_err(|_| "PUBLIC_BASE_URL must be set")?;
 
+    let admin_passphrase =
+        std::env::var("ADMIN_PASSPHRASE").map_err(|_| "ADMIN_PASSPHRASE must be set")?;
+
     let app_state = AppState {
         database_pool,
         public_base_url,
+        admin_passphrase,
     };
     let app = routes::router(app_state);
 

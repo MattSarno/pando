@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pando — Authorize</title>
+  <style>
+    :root {
+      --bg: #1d2021;
+      --bg-soft: #282828;
+      --bg-card: #3c3836;
+      --fg: #ebdbb2;
+      --fg-dim: #a89984;
+      --yellow: #fabd2f;
+      --yellow-dim: #d79921;
+      --red: #fb4934;
+      --burnt-orange: #d65d0e;
+      --border: #504945;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: ui-monospace, "SF Mono", "Cascadia Code", "Fira Code", Consolas, monospace;
+    }
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 2.5rem 2.75rem;
+      width: 100%;
+      max-width: 360px;
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+    }
+    h1 {
+      margin: 0 0 0.35rem;
+      font-size: 1.25rem;
+      color: var(--burnt-orange);
+    }
+    p.subtitle {
+      margin: 0 0 1.75rem;
+      color: var(--fg-dim);
+      font-size: 0.875rem;
+    }
+    label {
+      display: block;
+      font-size: 0.8rem;
+      color: var(--fg-dim);
+      margin-bottom: 0.4rem;
+    }
+    input[type="password"] {
+      width: 100%;
+      padding: 0.6rem 0.7rem;
+      margin-bottom: 1.25rem;
+      background: var(--bg-soft);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--fg);
+      font: inherit;
+    }
+    input[type="password"]:focus {
+      outline: none;
+      border-color: var(--yellow-dim);
+    }
+    button {
+      width: 100%;
+      padding: 0.65rem;
+      background: var(--yellow);
+      color: var(--bg);
+      border: none;
+      border-radius: 4px;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:hover { background: var(--yellow-dim); }
+    #error {
+      display: none;
+      background: rgba(251, 73, 24, 0.12);
+      border: 1px solid var(--red);
+      color: var(--red);
+      padding: 0.6rem 0.75rem;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      margin-bottom: 1.25rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Pando</h1>
+    <p class="subtitle">Enter the admin passphrase to authorize this client.</p>
+    <p id="error"></p>
+    <form method="post" action="/authorize" id="authorize-form">
+      <input type="hidden" name="client_id">
+      <input type="hidden" name="redirect_uri">
+      <input type="hidden" name="code_challenge">
+      <input type="hidden" name="code_challenge_method">
+      <input type="hidden" name="state">
+      <label for="passphrase">Passphrase</label>
+      <input type="password" name="passphrase" id="passphrase" autofocus>
+      <button type="submit">Authorize</button>
+    </form>
+  </div>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const params = new URLSearchParams(window.location.search);
+      const form = document.getElementById('authorize-form');
+      for (const field of ['client_id', 'redirect_uri', 'code_challenge', 'code_challenge_method', 'state']) {
+        form.elements[field].value = params.get(field) || '';
+      }
+
+      const error = params.get('error');
+      if (error) {
+        const el = document.getElementById('error');
+        el.textContent = error;
+        el.style.display = 'block';
+      }
+    });
+  </script>
+</body>
+</html>

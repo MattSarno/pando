@@ -4,4 +4,5 @@ use sqlx::{Pool, Postgres};
 pub struct AppState {
     pub database_pool: Pool<Postgres>,
     pub public_base_url: String,
+    pub admin_passphrase: String,
 }

@@ -1,6 +1,11 @@
-use crate::app::mcp::{PandoTools, tool_errors::{db_error, error_result}, validation::validate_key};
+use crate::app::mcp::{
+    PandoTools,
+    tool_errors::{db_error, error_result},
+    validation::validate_key,
+};
 use rmcp::{
-    ErrorData, handler::server::wrapper::Parameters, model::CallToolResult, serde_json::json, tool, tool_router,
+    ErrorData, handler::server::wrapper::Parameters, model::CallToolResult, serde_json::json, tool,
+    tool_router,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -165,7 +170,9 @@ impl PandoTools {
         }
     }
 
-    #[tool(description = "List tasks, optionally filtered by id, status, staleness, and/or linked subject")]
+    #[tool(
+        description = "List tasks, optionally filtered by id, status, staleness, and/or linked subject"
+    )]
     async fn task_list(
         &self,
         Parameters(body): Parameters<TaskListParams>,

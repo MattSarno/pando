@@ -19,3 +19,6 @@ target
 # Environment Variables
 .env*
 !.env.example
+
+# Local working notes, not for the public repo
+OAUTH_PLAN.md

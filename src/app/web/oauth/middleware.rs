@@ -1,3 +1,4 @@
+use crate::app::AppState;
 use axum::{
     extract::{Request, State},
     http::{HeaderValue, StatusCode, header},
@@ -5,7 +6,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use sha2::{Digest, Sha256};
-use crate::app::AppState;
 
 pub async fn require_bearer_token(
     State(app_state): State<AppState>,
@@ -46,7 +46,7 @@ fn unauthorized(public_base_url: &str) -> Response {
     let value = format!(
         r#"Bearer resource_metadata="{public_base_url}/.well-known/oauth-protected-resource""#
     );
-    
+
     if let Ok(header_value) = HeaderValue::from_str(&value) {
         response
             .headers_mut()

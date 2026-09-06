@@ -1,5 +1,6 @@
 use crate::app::web::health::health_check;
 use crate::app::web::oauth::authorize::{authorize_form, authorize_submit};
+use crate::app::web::oauth::middleware::require_bearer_token;
 use crate::app::web::oauth::register::register_client;
 use crate::app::web::oauth::token::request_token;
 use crate::app::web::oauth::{
@@ -7,10 +8,11 @@ use crate::app::web::oauth::{
 };
 use crate::app::{AppState, mcp::PandoTools};
 use axum::routing::post;
-use axum::{Router, routing::get};
+use axum::{Router, middleware, routing::get};
 use rmcp::transport::streamable_http_server::{
     StreamableHttpService, session::local::LocalSessionManager,
 };
+use tower::ServiceBuilder;
 
 pub fn router(state: AppState) -> Router {
     let mcp_state = state.clone();
@@ -19,6 +21,13 @@ pub fn router(state: AppState) -> Router {
         LocalSessionManager::default().into(),
         Default::default(),
     );
+
+    let protected_mcp_service = ServiceBuilder::new()
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_bearer_token,
+        ))
+        .service(mcp_service);
 
     Router::new()
         .route("/health", get(health_check))
@@ -32,5 +41,5 @@ pub fn router(state: AppState) -> Router {
         .route("/authorize", post(authorize_submit))
         .route("/token", post(request_token))
         .with_state(state)
-        .nest_service("/mcp", mcp_service)
+        .nest_service("/mcp", protected_mcp_service)
 }

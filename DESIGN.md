@@ -34,6 +34,9 @@ All three clients call the same MCP tools against the same database. No sync, no
 | subjects       | Anchors for projects, ongoing focuses, and relationships             | slug, title, category, status, summary, updated_at, updated_by              |
 | memory_entries | Durable context the AI reads to stay consistent, with per-subject overrides | id, scope, key, subject_id, description, content, updated_at, updated_by |
 | tasks          | Cross-surface action items                                          | id, text, status, priority, linked_subject, due_date, source, created_at, completed_at, updated_at, updated_by |
+| oauth_clients  | Dynamically registered OAuth clients (RFC 7591)                     | client_id, redirect_uris, client_name, created_at                          |
+| oauth_auth_codes | Short-lived, single-use authorization codes                       | code, client_id, redirect_uri, code_challenge, expires_at, used_at         |
+| oauth_tokens   | Issued access/refresh token pairs, hashed at rest                   | id, client_id, access_token_hash, refresh_token_hash, access_expires_at, refresh_expires_at, created_at, revoked_at |
 
 All three tables are finalized — see `migrations/0001_create_subjects.up.sql`,
 `migrations/0002_create_memory_entries.up.sql`, and
@@ -41,6 +44,9 @@ All three tables are finalized — see `migrations/0001_create_subjects.up.sql`,
 `migrations/0004_restrict_memory_entries_subject_delete.up.sql` later changes
 `memory_entries.subject_id`'s FK from `ON DELETE CASCADE` to
 `ON DELETE RESTRICT` — see `subject_delete` in #6 for why.
+The three `oauth_*` tables are defined in
+`migrations/0005_create_oauth_tables.up.sql` — see #8 for the mechanism they
+support.
 
 Recurring/habit-style tasks were deliberately scoped out of `tasks` — planned
 as a separate `habits` + `habit_completions` pair later, since a recurring
@@ -220,14 +226,38 @@ Enforced wherever `key` is written (`memory_write`).
 
 - **No credentials/secrets ever stored** — categorical rule, no exceptions, regardless of other protections in place.
 - Chat requires the MCP endpoint to be reachable over the public internet. Full network isolation is not viable for the whole system.
-- **Primary defense:** strong auth (API key or OAuth) on the endpoint.
-- **Secondary:** rate limiting + logging, so a leaked/guessed token doesn't mean unlimited silent access.
+- **Primary defense: self-hosted OAuth 2.1.** Pando is both the authorization
+  server and the resource server — no third-party IdP, since there's exactly
+  one resource owner and no multi-tenant problem to solve.
+  - Clients register themselves via Dynamic Client Registration (RFC 7591,
+    `POST /register`) rather than being provisioned by hand. All clients are
+    public (no `client_secret` — Chat and Code both run in environments that
+    can't keep one confidential), so PKCE (RFC 7636, `S256` only) is required
+    on every authorization-code exchange.
+  - The one human approval gate is a passphrase-protected `/authorize` page.
+    No login session/cookie — every authorization (or consent refresh)
+    re-enters the passphrase, which is checked with a constant-time
+    comparison since it's evaluated over the network.
+  - Access and refresh tokens are opaque random strings; only their SHA-256
+    hashes are ever stored, so a compromised database can't be used to
+    reconstruct a working credential. Access tokens are short-lived (roughly
+    an hour); refresh tokens rotate on every use — each refresh invalidates
+    the token that was just spent, so a copied refresh token stops working
+    the moment the legitimate client uses its own (now-superseded) copy.
+  - An unauthenticated request to `/mcp` gets a `401` carrying a
+    `WWW-Authenticate` header pointing at
+    `/.well-known/oauth-protected-resource`, which in turn points at
+    `/.well-known/oauth-authorization-server` — the whole flow (where to
+    register, authorize, and get a token) is discoverable by a client from
+    nothing but the `/mcp` URL.
+- **Secondary:** rate limiting + logging, so a leaked/guessed token doesn't
+  mean unlimited silent access. Not yet built — a reasonable follow-on once
+  the auth mechanism itself has seen real use, not a blocker for it.
 - Categorical content exclusion (no sensitive/confidential info written into memory at all) is the backstop, not the only layer.
 
 ## 9. Open Questions
 
 - Hosting targets (Fly.io vs VPS)
-- Auth mechanism specifics (API key vs OAuth)
 
 ## 10. Repo / Licensing
 - Repo name: `pando`

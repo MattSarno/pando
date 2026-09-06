@@ -1,6 +1,7 @@
 use crate::app::web::health::health_check;
 use crate::app::web::oauth::authorize::{authorize_form, authorize_submit};
 use crate::app::web::oauth::register::register_client;
+use crate::app::web::oauth::token::request_token;
 use crate::app::web::oauth::{
     authorization_server::auth_server, protected_resource::protected_resource,
 };
@@ -29,6 +30,7 @@ pub fn router(state: AppState) -> Router {
         .route("/register", post(register_client))
         .route("/authorize", get(authorize_form))
         .route("/authorize", post(authorize_submit))
+        .route("/token", post(request_token))
         .with_state(state)
         .nest_service("/mcp", mcp_service)
 }

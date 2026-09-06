@@ -20,5 +20,9 @@ target
 .env*
 !.env.example
 
+# Fly.io deploy config, instance-specific
+fly.toml*
+!fly.toml.example
+
 # Local working notes, not for the public repo
 OAUTH_PLAN.md

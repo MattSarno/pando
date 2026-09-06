@@ -17,3 +17,6 @@ time = { version = "0.3", features = ["serde-human-readable"] }
 rand = "0.10"
 subtle = "2.6"
 form_urlencoded = "1"
+sha2 = "0.11"
+base64 = "0.23"
+hex = "0.4"

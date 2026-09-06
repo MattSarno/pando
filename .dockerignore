@@ -1,0 +1,7 @@
+target
+.git
+.env*
+!.env.example
+OAUTH_PLAN.md
+**/*.rs.bk
+**/mutants.out*/

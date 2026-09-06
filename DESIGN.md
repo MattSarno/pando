@@ -86,7 +86,7 @@ cleared by passing an empty string `""` — omitting the param entirely means
 hyphenated) — same shape and same reasoning as `subjects.slug`: cheap
 insurance against casing/spacing drift (`"tz"` vs `"timezone"`) creating
 duplicate, unrelated entries for what's meant to be the same concept.
-Enforced wherever `key` is written (`memory_write`).
+Enforced wherever a new `key` is written (`memory_create`).
 
 **Subjects**
 - `subject_create(slug, title, category, summary?, updated_by)` → created row.
@@ -136,30 +136,46 @@ Enforced wherever `key` is written (`memory_write`).
     deleted it.
 
 **Memory**
+- `memory_create(scope, key, content, description, subject_id?, updated_by)`
+  → created row.
+  - `key` must match the kebab-case pattern (see the shared convention
+    note above) — this is the tool that actually enforces it, since it's
+    the only place a new `key` gets written; `memory_update` never changes
+    it.
+  - `content` and `description` are both required and must be non-empty —
+    a memory entry with nothing in it or no way to find it later via
+    `memory_search` isn't useful yet, so neither is optional the way they
+    can be left blank on `subjects`/`tasks`.
+  - Duplicate `(scope, key)` (or `(scope, key, subject_id)` when given) is
+    a hard error, not an upsert — same pattern as `subject_create`. Use
+    `memory_update` to change an existing entry.
+  - Errors if `subject_id` is given but doesn't reference an existing
+    subject.
 - `memory_read(scope, key, subject_id?)` → matching row (`content`,
   `description`, `updated_at`, `updated_by`), or not-found (empty result,
   not an error — "no memory of X yet" is a normal case).
   - If `subject_id` is given but no override row exists for it, falls back
     to the global default (`subject_id IS NULL`) for that `(scope, key)`.
     Returns only the resolved value, not both override and default.
-- `memory_write(scope, key, content, description?, subject_id?, updated_by)`
-  → upserted row. Upserts on `(scope, key)` when `subject_id` is omitted,
-  `(scope, key, subject_id)` otherwise — matching the two unique indexes.
-  - `key` must match the kebab-case pattern (see the shared convention
-    note above) — this is the tool that actually enforces it, since it's
-    the only place `key` gets written.
+- `memory_update(scope, key, subject_id?, content?, description?,
+  updated_by)` → updated row.
+  - `key` and `subject_id` together select the target row (matched with
+    `IS NOT DISTINCT FROM`, so `NULL` correctly targets the global-default
+    row instead of matching nothing) — neither is editable here, same
+    "not renameable" reasoning as `subjects.slug`.
+  - At least one of `content` / `description` must be provided — same
+    no-op rejection rule as `subject_update`/`task_update`. Whichever is
+    omitted keeps its existing value.
+  - Errors if no row matches the target, rather than creating one — a
+    missing target most likely means a wrong `key`, and silently
+    upserting would hide that.
 - `memory_delete(scope, key, subject_id?, updated_by)` → void.
-  - Targets the exact row like `memory_write`'s upsert target — no
-    fallback like `memory_read` has, so deleting an override can never
-    accidentally take out the global default or vice versa.
-  - Errors if no row matches the target — a missing target most likely
-    means a wrong `key`, and silently succeeding would hide that.
+  - Targets the exact row the same way `memory_update` does — no fallback
+    like `memory_read` has, so deleting an override can never accidentally
+    take out the global default or vice versa.
+  - Errors if no row matches the target — same reasoning as
+    `memory_update`.
   - `updated_by` logged same as `subject_delete`, nothing to persist it to.
-  - `description` is required on first write for a key — a brand-new entry
-    with no `description` is a hard error, no placeholder, so every entry
-    stays easy to find via `memory_search` later. Optional on later writes
-    to the same key, where omitted means "keep the existing description,"
-    so correcting `content` doesn't force resupplying it.
 - `memory_search(query, scope?, subject_id?)` → matching rows. Matches
   `query` against `key`, `description`, and `content` via `ILIKE`
   (full-text search is more than this needs at personal scale).

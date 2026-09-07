@@ -26,3 +26,4 @@ fly.toml*
 
 # Local working notes, not for the public repo
 OAUTH_PLAN.md
+CLAUDE.md

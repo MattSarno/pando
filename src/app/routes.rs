@@ -1,4 +1,4 @@
-use crate::app::web::health::health_check;
+use crate::app::web::health::{health_check, readiness_check};
 use crate::app::web::oauth::authorize::{authorize_form, authorize_submit};
 use crate::app::web::oauth::middleware::require_bearer_token;
 use crate::app::web::oauth::register::register_client;
@@ -34,6 +34,7 @@ pub fn router(state: AppState) -> Router {
 
     Router::new()
         .route("/health", get(health_check))
+        .route("/ready", get(readiness_check))
         .route("/.well-known/oauth-authorization-server", get(auth_server))
         .route(
             "/.well-known/oauth-protected-resource",

@@ -56,6 +56,7 @@ struct SubjectListParams {
     status: Option<Status>,
 }
 
+#[allow(dead_code)]
 #[derive(Deserialize, JsonSchema)]
 struct SubjectDeleteParams {
     slug: String,
@@ -168,10 +169,10 @@ impl PandoTools {
             ));
         }
 
-        if let Some(title) = body.title.as_deref() {
-            if title.trim().is_empty() {
-                return Ok(error_result("title must not be empty"));
-            }
+        if let Some(title) = body.title.as_deref()
+            && title.trim().is_empty()
+        {
+            return Ok(error_result("title must not be empty"));
         }
 
         if let Some(new_status) = &body.status {

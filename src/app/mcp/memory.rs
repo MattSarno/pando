@@ -70,6 +70,7 @@ struct MemoryUpdateParams {
     updated_by: String,
 }
 
+#[allow(dead_code)]
 #[derive(Deserialize, JsonSchema)]
 struct MemoryDeleteParams {
     scope: Scope,
@@ -89,10 +90,10 @@ impl PandoTools {
             return Ok(error_result(message));
         }
 
-        if let Some(subject_id) = body.subject_id.as_deref() {
-            if let Err(message) = validate_key("subject_id", subject_id) {
-                return Ok(error_result(message));
-            }
+        if let Some(subject_id) = body.subject_id.as_deref()
+            && let Err(message) = validate_key("subject_id", subject_id)
+        {
+            return Ok(error_result(message));
         }
 
         if body.content.trim().is_empty() {
@@ -181,7 +182,7 @@ impl PandoTools {
             return Ok(error_result("query must not be empty"));
         }
 
-        let pattern = format!("%{}%", escape_like_wildcards(&query));
+        let pattern = format!("%{}%", escape_like_wildcards(query));
         let result = sqlx::query_as::<_, MemoryEntry>(
             "SELECT * FROM memory_entries
             WHERE (key ILIKE $1 OR description ILIKE $1 OR content ILIKE $1)
@@ -234,16 +235,16 @@ impl PandoTools {
             ));
         }
 
-        if let Some(content) = body.content.as_deref() {
-            if content.trim().is_empty() {
-                return Ok(error_result("content must not be empty"));
-            }
+        if let Some(content) = body.content.as_deref()
+            && content.trim().is_empty()
+        {
+            return Ok(error_result("content must not be empty"));
         }
 
-        if let Some(description) = body.description.as_deref() {
-            if description.trim().is_empty() {
-                return Ok(error_result("description must not be empty"));
-            }
+        if let Some(description) = body.description.as_deref()
+            && description.trim().is_empty()
+        {
+            return Ok(error_result("description must not be empty"));
         }
 
         let result = sqlx::query_as::<_, MemoryEntry>(

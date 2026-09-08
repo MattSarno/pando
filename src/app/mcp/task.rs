@@ -87,6 +87,7 @@ struct TaskCompleteParams {
     updated_by: String,
 }
 
+#[allow(dead_code)]
 #[derive(Deserialize, JsonSchema)]
 struct TaskDeleteParams {
     id: i64,
@@ -124,10 +125,10 @@ impl PandoTools {
 
         let priority = body.priority.unwrap_or(Priority::Medium);
 
-        if let Some(subject_id) = body.linked_subject.as_deref() {
-            if let Err(message) = validate_key("linked_subject", subject_id) {
-                return Ok(error_result(message));
-            }
+        if let Some(subject_id) = body.linked_subject.as_deref()
+            && let Err(message) = validate_key("linked_subject", subject_id)
+        {
+            return Ok(error_result(message));
         }
 
         let due_date = match body.due_date.as_deref() {
@@ -150,7 +151,7 @@ impl PandoTools {
         .bind(&default_status)
         .bind(&priority)
         .bind(&body.linked_subject)
-        .bind(&due_date)
+        .bind(due_date)
         .bind(&body.source)
         .fetch_one(self.database_pool())
         .await;
@@ -185,10 +186,10 @@ impl PandoTools {
                AND ($4::int IS NULL OR updated_at < now() - ($4::int * interval '1 day'))
              ORDER BY updated_at DESC",
         )
-        .bind(&body.id)
+        .bind(body.id)
         .bind(&body.status)
         .bind(&body.linked_subject)
-        .bind(&body.stale_days)
+        .bind(body.stale_days)
         .fetch_all(self.database_pool())
         .await;
 
@@ -213,16 +214,16 @@ impl PandoTools {
             ));
         }
 
-        if let Some(text) = body.text.as_deref() {
-            if text.trim().is_empty() {
-                return Ok(error_result("text must not be empty"));
-            }
+        if let Some(text) = body.text.as_deref()
+            && text.trim().is_empty()
+        {
+            return Ok(error_result("text must not be empty"));
         }
 
-        if body.status.is_some() {
-            if let Err(response) = validate_status(self.database_pool(), body.id).await? {
-                return Ok(response);
-            }
+        if body.status.is_some()
+            && let Err(response) = validate_status(self.database_pool(), body.id).await?
+        {
+            return Ok(response);
         }
 
         let due_date_provided = body.due_date.is_some();
@@ -248,11 +249,11 @@ impl PandoTools {
             WHERE id = $1
             RETURNING *",
         )
-        .bind(&body.id)
+        .bind(body.id)
         .bind(&body.status)
         .bind(&body.priority)
         .bind(due_date_provided)
-        .bind(&due_date)
+        .bind(due_date)
         .bind(&body.text)
         .bind(&body.updated_by)
         .fetch_optional(self.database_pool())
@@ -283,7 +284,7 @@ impl PandoTools {
             WHERE id = $1
             RETURNING *",
         )
-        .bind(&body.id)
+        .bind(body.id)
         .bind(&body.updated_by)
         .fetch_optional(self.database_pool())
         .await;
@@ -301,7 +302,7 @@ impl PandoTools {
         Parameters(body): Parameters<TaskDeleteParams>,
     ) -> Result<CallToolResult, ErrorData> {
         let result = sqlx::query("DELETE FROM tasks WHERE id = $1")
-            .bind(&body.id)
+            .bind(body.id)
             .execute(self.database_pool())
             .await;
 

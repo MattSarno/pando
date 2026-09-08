@@ -12,6 +12,7 @@ use time::{Duration, OffsetDateTime};
 
 const AUTH_CODE_TTL_MINUTES: i64 = 10;
 
+#[allow(dead_code)]
 #[derive(Deserialize)]
 pub struct AuthorizeQuery {
     response_type: String,

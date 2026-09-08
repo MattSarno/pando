@@ -55,10 +55,10 @@ fn allowed_mcp_hosts(public_base_url: &str) -> Vec<String> {
         "::1".to_string(),
     ];
 
-    if let Ok(uri) = public_base_url.parse::<Uri>() {
-        if let Some(authority) = uri.authority() {
-            hosts.push(authority.as_str().to_string());
-        }
+    if let Ok(uri) = public_base_url.parse::<Uri>()
+        && let Some(authority) = uri.authority()
+    {
+        hosts.push(authority.as_str().to_string());
     }
 
     hosts

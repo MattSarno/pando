@@ -1,11 +1,11 @@
-app = "your-app-name"
+app = "pando-server"
 primary_region = "ord"
 
 [build]
 
 [env]
   HOST_URL = "0.0.0.0:8080"
-  PUBLIC_BASE_URL = "https://pando.example.com"
+  PUBLIC_BASE_URL = "https://pando-server.fly.dev"
 
 [http_service]
   internal_port = 8080

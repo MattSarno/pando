@@ -249,7 +249,10 @@ Enforced wherever a new `key` is written (`memory_create`).
     `POST /register`) rather than being provisioned by hand. All clients are
     public (no `client_secret` — Chat and Code both run in environments that
     can't keep one confidential), so PKCE (RFC 7636, `S256` only) is required
-    on every authorization-code exchange.
+    on every authorization-code exchange. Registration stays unauthenticated
+    because the clients that use it register themselves programmatically and
+    have no way to present a secret; it is rate-limited per client IP instead,
+    and stale registrations are a retention concern rather than an access one.
   - The one human approval gate is a passphrase-protected `/authorize` page.
     No login session/cookie — every authorization (or consent refresh)
     re-enters the passphrase, which is checked with a constant-time
@@ -266,9 +269,19 @@ Enforced wherever a new `key` is written (`memory_create`).
     `/.well-known/oauth-authorization-server` — the whole flow (where to
     register, authorize, and get a token) is discoverable by a client from
     nothing but the `/mcp` URL.
-- **Secondary:** rate limiting + logging, so a leaked/guessed token doesn't
-  mean unlimited silent access. Not yet built — a reasonable follow-on once
-  the auth mechanism itself has seen real use, not a blocker for it.
+- **Secondary: per-IP rate limiting + logging.** `/register`, `/token`, and
+  `/authorize` are rate-limited per client IP, taken from Fly's
+  `Fly-Client-IP` header, and repeated wrong passphrases lock that IP out for
+  a period. Limit state is held in memory: there is one machine, and a restart
+  resetting it only briefly widens the window. Every denial is logged with its
+  bucket and IP. Thresholds come from environment variables and are
+  deliberately recorded neither here nor in source — the repo is public, and
+  published numbers let a caller tune requests to stay just under them.
+- `/ready`, the database probe, requires the admin passphrase in an
+  `X-Pando-Passphrase` header, compared in constant time, so anonymous traffic
+  can't wake the database. Wrong guesses count toward the same lockout as
+  `/authorize`, so the probe doesn't become a second, unthrottled way to guess
+  the passphrase. `/health` stays open and never touches the database.
 - Categorical content exclusion (no sensitive/confidential info written into memory at all) is the backstop, not the only layer.
 
 ## 9. Open Questions

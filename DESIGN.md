@@ -15,7 +15,7 @@ The core issue this solves: finishing something in one Claude surface and having
 ## 3. Architecture Overview
 
     Claude Code  ─┐
-    Claude Chat  ─┼──▶  Pando (Axum, MCP server)  ──▶  Postgres (Neon?)
+    Claude Chat  ─┼──▶  Pando (Axum, MCP server)  ──▶  Postgres (Neon)
     Cowork       ─┘
 
 All three clients call the same MCP tools against the same database. No sync, no reconciliation, last write wins (should only be using one at a time any way), and every client reads current state on every call.
@@ -23,9 +23,9 @@ All three clients call the same MCP tools against the same database. No sync, no
 ## 4. Tech Stack
 
 - **Language/framework:** Rust, Axum
-- **Database:** Postgres, hosted on Neon?
+- **Database:** Postgres, hosted on Neon
 - **Interface:** MCP server (tools, not REST — see #6)
-- **Deployment:** containerized, TBD host (Fly.io / small VPS)
+- **Deployment:** containerized, on Fly.io; CI deploys every merge to `main`
 
 ## 5. Schema
 
@@ -286,7 +286,7 @@ Enforced wherever a new `key` is written (`memory_create`).
 
 ## 9. Open Questions
 
-- Hosting targets (Fly.io vs VPS)
+- None currently open.
 
 ## 10. Repo / Licensing
 - Repo name: `pando`

@@ -1,8 +1,9 @@
 use crate::app::AppState;
+use crate::app::web::rate_limit::{Bucket, client_ip};
 use axum::{
     Json,
     extract::State,
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
 use rand::distr::{Alphanumeric, SampleString};
@@ -29,8 +30,23 @@ pub struct RegisterError {
 
 pub async fn register_client(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<RegisterRequest>,
 ) -> Response {
+    if !state
+        .rate_limiter
+        .check(Bucket::Register, client_ip(&headers))
+    {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(RegisterError {
+                error: "temporarily_unavailable".to_string(),
+                error_description: "too many registration attempts, try again later".to_string(),
+            }),
+        )
+            .into_response();
+    }
+
     if body.redirect_uris.is_empty() {
         return (
             StatusCode::BAD_REQUEST,

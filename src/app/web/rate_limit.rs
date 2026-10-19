@@ -75,6 +75,7 @@ impl RateLimiter {
             window.count += 1;
             true
         } else {
+            eprintln!("rate_limit: {bucket:?} limit reached for {ip}");
             false
         }
     }
@@ -86,9 +87,17 @@ impl RateLimiter {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-        windows
+        let locked_out = windows
             .get(&(Bucket::PassphraseFailure, ip))
-            .is_some_and(|window| window.start.elapsed() <= lockout && window.count >= max_failures)
+            .is_some_and(|window| {
+                window.start.elapsed() <= lockout && window.count >= max_failures
+            });
+
+        if locked_out {
+            eprintln!("rate_limit: passphrase lockout active for {ip}");
+        }
+
+        locked_out
     }
 
     pub fn record_passphrase_failure(&self, ip: IpAddr) {

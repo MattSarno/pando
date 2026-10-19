@@ -10,7 +10,7 @@ See [`design.md`](DESIGN.md) for the full architecture.
 
 ## Status
 
-🌱 Early design phase — not yet functional.
+🌱 Live and in daily use with Claude Code and Claude chat. Still pre-v1.
 
 ## Stack
 

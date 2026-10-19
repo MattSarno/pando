@@ -1,5 +1,7 @@
+use pando::app::web::rate_limit::{RateLimitConfig, RateLimiter};
 use pando::app::{AppState, routes};
 use sqlx::postgres::PgPoolOptions;
+use std::{str::FromStr, sync::Arc, time::Duration};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -17,10 +19,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let admin_passphrase =
         std::env::var("ADMIN_PASSPHRASE").map_err(|_| "ADMIN_PASSPHRASE must be set")?;
 
+    let rate_limit_config = RateLimitConfig {
+        window: Duration::from_secs(required_env("RATE_LIMIT_WINDOW_SECS")?),
+        register_max: required_env("RATE_LIMIT_REGISTER_MAX")?,
+        token_max: required_env("RATE_LIMIT_TOKEN_MAX")?,
+        authorize_max: required_env("RATE_LIMIT_AUTHORIZE_MAX")?,
+        passphrase_failure_max: required_env("PASSPHRASE_FAILURE_MAX")?,
+        passphrase_lockout: Duration::from_secs(required_env("PASSPHRASE_LOCKOUT_SECS")?),
+    };
+
     let app_state = AppState {
         database_pool,
         public_base_url,
         admin_passphrase,
+        rate_limiter: Arc::new(RateLimiter::new(rate_limit_config)),
     };
     let app = routes::router(app_state);
 
@@ -28,4 +40,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+fn required_env<T: FromStr>(name: &str) -> Result<T, String> {
+    std::env::var(name)
+        .map_err(|_| format!("{name} must be set"))?
+        .parse()
+        .map_err(|_| format!("{name} must be a non-negative integer"))
 }

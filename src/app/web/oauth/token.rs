@@ -1,7 +1,7 @@
 use axum::{
     Form, Json,
     extract::State,
-    http::{HeaderValue, StatusCode, header},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -11,6 +11,7 @@ use sha2::{Digest, Sha256};
 use time::{Duration, OffsetDateTime};
 
 use crate::app::AppState;
+use crate::app::web::rate_limit::{Bucket, client_ip};
 
 const ACCESS_TOKEN_TTL_SECONDS: i64 = 3600;
 const REFRESH_TOKEN_TTL_DAYS: i64 = 30;
@@ -53,8 +54,23 @@ struct RefreshTokenGrant {
 
 pub async fn request_token(
     State(app_state): State<AppState>,
+    headers: HeaderMap,
     Form(params): Form<TokenRequest>,
 ) -> Response {
+    if !app_state
+        .rate_limiter
+        .check(Bucket::Token, client_ip(&headers))
+    {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(TokenError {
+                error: "temporarily_unavailable".to_string(),
+                error_description: "too many token requests, try again later".to_string(),
+            }),
+        )
+            .into_response();
+    }
+
     match params.grant_type.as_str() {
         "authorization_code" => {
             let Some(code) = params.code else {

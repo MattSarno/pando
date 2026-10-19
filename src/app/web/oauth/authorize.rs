@@ -1,8 +1,9 @@
 use crate::app::AppState;
+use crate::app::web::rate_limit::{Bucket, client_ip};
 use axum::{
     Form,
     extract::{Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Redirect, Response},
 };
 use rand::distr::{Alphanumeric, SampleString};
@@ -47,14 +48,28 @@ pub async fn authorize_form(Query(params): Query<AuthorizeQuery>) -> Response {
 
 pub async fn authorize_submit(
     State(app_state): State<AppState>,
+    headers: HeaderMap,
     Form(body): Form<AuthorizeSubmit>,
 ) -> Response {
+    let ip = client_ip(&headers);
+    if app_state.rate_limiter.is_locked_out(ip)
+        || !app_state.rate_limiter.check(Bucket::Authorize, ip)
+    {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            "too many attempts, try again later",
+        )
+            .into_response();
+    }
+
     let authorized = bool::from(
         body.passphrase
             .as_bytes()
             .ct_eq(app_state.admin_passphrase.as_bytes()),
     );
     if !authorized {
+        app_state.rate_limiter.record_passphrase_failure(ip);
+
         let mut retry_params = vec![
             ("response_type", "code"),
             ("client_id", body.client_id.as_str()),
@@ -69,6 +84,7 @@ pub async fn authorize_submit(
 
         return Redirect::to(&append_query("/authorize", &retry_params)).into_response();
     }
+    app_state.rate_limiter.clear_passphrase_failures(ip);
 
     if body.code_challenge_method != "S256" {
         return (StatusCode::BAD_REQUEST, "unsupported code_challenge_method").into_response();

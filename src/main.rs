@@ -53,7 +53,7 @@ fn init_tracing() -> Result<(), String> {
     let subscriber = tracing_subscriber::fmt().with_env_filter(filter);
 
     match std::env::var("LOG_FORMAT").as_deref() {
-        Ok("json") => subscriber.json().init(),
+        Ok("json") => subscriber.json().with_span_list(false).init(),
         Ok("text") | Err(_) => subscriber.init(),
         Ok(_) => return Err("LOG_FORMAT must be \"json\" or \"text\"".to_string()),
     }

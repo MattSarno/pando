@@ -2,10 +2,14 @@ use pando::app::web::rate_limit::{RateLimitConfig, RateLimiter};
 use pando::app::{AppState, routes};
 use sqlx::postgres::PgPoolOptions;
 use std::{str::FromStr, sync::Arc, time::Duration};
+use tracing_subscriber::EnvFilter;
+
+const DEFAULT_LOG_FILTER: &str = "pando=info,tower_http=info,warn";
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = dotenvy::dotenv();
+    init_tracing()?;
     let host_url = std::env::var("HOST_URL").map_err(|_| "HOST_URL must be set")?;
     let database_url = std::env::var("DATABASE_URL").map_err(|_| "DATABASE_URL must be set")?;
     let database_pool = PgPoolOptions::new()
@@ -37,7 +41,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = routes::router(app_state);
 
     let listener = tokio::net::TcpListener::bind(host_url).await?;
+    tracing::info!(address = %listener.local_addr()?, "listening");
     axum::serve(listener, app).await?;
+
+    Ok(())
+}
+
+fn init_tracing() -> Result<(), String> {
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(DEFAULT_LOG_FILTER));
+    let subscriber = tracing_subscriber::fmt().with_env_filter(filter);
+
+    match std::env::var("LOG_FORMAT").as_deref() {
+        Ok("json") => subscriber.json().init(),
+        Ok("text") | Err(_) => subscriber.init(),
+        Ok(_) => return Err("LOG_FORMAT must be \"json\" or \"text\"".to_string()),
+    }
 
     Ok(())
 }

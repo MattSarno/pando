@@ -8,6 +8,7 @@ use axum::{
 };
 use rand::distr::{Alphanumeric, SampleString};
 use serde::{Deserialize, Serialize};
+use tracing::error;
 
 #[derive(Deserialize)]
 pub struct RegisterRequest {
@@ -79,7 +80,7 @@ pub async fn register_client(
         )
             .into_response(),
         Err(error) => {
-            eprintln!("register_client: failed to insert oauth client: {error}");
+            error!(%error, "failed to insert oauth client");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }

@@ -2,7 +2,7 @@ use crate::app::AppState;
 use crate::app::web::rate_limit::{Bucket, client_ip};
 use axum::{
     Json,
-    extract::State,
+    extract::{State, rejection::JsonRejection},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
@@ -32,7 +32,7 @@ pub struct RegisterError {
 pub async fn register_client(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(body): Json<RegisterRequest>,
+    body: Result<Json<RegisterRequest>, JsonRejection>,
 ) -> Response {
     if !state
         .rate_limiter
@@ -47,6 +47,11 @@ pub async fn register_client(
         )
             .into_response();
     }
+
+    let Json(body) = match body {
+        Ok(body) => body,
+        Err(rejection) => return rejection.into_response(),
+    };
 
     if body.redirect_uris.is_empty() {
         return (

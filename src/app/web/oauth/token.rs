@@ -1,6 +1,6 @@
 use axum::{
     Form, Json,
-    extract::State,
+    extract::{State, rejection::FormRejection},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
@@ -56,7 +56,7 @@ struct RefreshTokenGrant {
 pub async fn request_token(
     State(app_state): State<AppState>,
     headers: HeaderMap,
-    Form(params): Form<TokenRequest>,
+    params: Result<Form<TokenRequest>, FormRejection>,
 ) -> Response {
     if !app_state
         .rate_limiter
@@ -71,6 +71,11 @@ pub async fn request_token(
         )
             .into_response();
     }
+
+    let Form(params) = match params {
+        Ok(params) => params,
+        Err(rejection) => return rejection.into_response(),
+    };
 
     match params.grant_type.as_str() {
         "authorization_code" => {

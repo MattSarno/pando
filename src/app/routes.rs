@@ -9,6 +9,8 @@ use crate::app::web::oauth::{
 use crate::app::{AppState, mcp::PandoTools};
 use axum::extract::Request;
 use axum::http::Uri;
+use axum::middleware::Next;
+use axum::response::Response;
 use axum::routing::post;
 use axum::{Router, middleware, routing::get};
 use rmcp::transport::streamable_http_server::{
@@ -20,6 +22,8 @@ use tower_http::request_id::{
 };
 use tower_http::trace::{DefaultOnResponse, TraceLayer};
 use tracing::{Level, Span, info_span};
+
+const REQUEST_ID_HEADER: &str = "x-request-id";
 
 pub fn router(state: AppState) -> Router {
     let mcp_state = state.clone();
@@ -39,11 +43,13 @@ pub fn router(state: AppState) -> Router {
         .service(mcp_service);
 
     let request_logging = ServiceBuilder::new()
+        .layer(middleware::from_fn(strip_client_request_id))
         .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(request_span)
-                .on_response(DefaultOnResponse::new().level(Level::INFO)),
+                .on_response(DefaultOnResponse::new().level(Level::INFO))
+                .on_failure(()),
         )
         .layer(PropagateRequestIdLayer::x_request_id());
 
@@ -61,7 +67,13 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
         .nest_service("/mcp", protected_mcp_service)
         .layer(request_logging)
+        // Registered after the layer so Fly's 30s health checks stay out of the logs.
         .route("/health", get(health_check))
+}
+
+async fn strip_client_request_id(mut request: Request, next: Next) -> Response {
+    request.headers_mut().remove(REQUEST_ID_HEADER);
+    next.run(request).await
 }
 
 fn request_span(request: &Request) -> Span {
@@ -73,7 +85,7 @@ fn request_span(request: &Request) -> Span {
 
     info_span!(
         "request",
-        id = %request_id,
+        request_id = %request_id,
         method = %request.method(),
         path = %request.uri().path(),
     )

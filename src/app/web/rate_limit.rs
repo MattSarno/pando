@@ -65,37 +65,42 @@ impl RateLimiter {
         let window = windows.entry(key).or_insert(Window {
             count: 0,
             start: now,
+            denial_logged: false,
         });
 
         if now.duration_since(window.start) > window_duration {
             window.count = 0;
             window.start = now;
+            window.denial_logged = false;
         }
 
         if window.count < max_requests {
             window.count += 1;
             true
         } else {
-            warn!(?bucket, %ip, "rate limit reached");
+            if !window.denial_logged {
+                warn!(?bucket, %ip, "rate limit reached");
+                window.denial_logged = true;
+            }
             false
         }
     }
 
     pub fn is_locked_out(&self, ip: IpAddr) -> bool {
         let (max_failures, lockout) = self.limit_for(Bucket::PassphraseFailure);
-        let windows = self
+        let mut windows = self
             .windows
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-        let locked_out = windows
-            .get(&(Bucket::PassphraseFailure, ip))
-            .is_some_and(|window| {
-                window.start.elapsed() <= lockout && window.count >= max_failures
-            });
+        let Some(window) = windows.get_mut(&(Bucket::PassphraseFailure, ip)) else {
+            return false;
+        };
+        let locked_out = window.start.elapsed() <= lockout && window.count >= max_failures;
 
-        if locked_out {
+        if locked_out && !window.denial_logged {
             warn!(%ip, "passphrase lockout active");
+            window.denial_logged = true;
         }
 
         locked_out
@@ -129,6 +134,7 @@ impl RateLimiter {
 struct Window {
     count: u32,
     start: Instant,
+    denial_logged: bool,
 }
 
 pub fn client_ip(headers: &HeaderMap) -> IpAddr {

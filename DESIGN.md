@@ -273,8 +273,11 @@ Enforced wherever a new `key` is written (`memory_create`).
   `/authorize` are rate-limited per client IP, taken from Fly's
   `Fly-Client-IP` header, and repeated wrong passphrases lock that IP out for
   a period. Limit state is held in memory: there is one machine, and a restart
-  resetting it only briefly widens the window. Every denial is logged with its
-  bucket and IP. Thresholds come from environment variables and are
+  resetting it only briefly widens the window. The first denial per IP and
+  window is logged with its bucket and IP; later ones in the same window are
+  not, so repeated requests can't bury the warnings. Limits are checked before the
+  request body is parsed, so malformed requests count too. Thresholds come
+  from environment variables and are
   deliberately recorded neither here nor in source — the repo is public, and
   published numbers let a caller tune requests to stay just under them.
 - `/ready`, the database probe, requires the admin passphrase in an
@@ -282,10 +285,13 @@ Enforced wherever a new `key` is written (`memory_create`).
   can't wake the database. Wrong guesses count toward the same lockout as
   `/authorize`, so the probe doesn't become a second, unthrottled way to guess
   the passphrase. `/health` stays open and never touches the database.
-- **Logging is structured** (`tracing`). Every request except `/health` runs
-  in a span carrying a generated request id (echoed back as `x-request-id`),
-  the method, and the path — never headers or the query string, which carry
-  the bearer token, the passphrase, and OAuth flow parameters. Client IPs
+- **Logging is structured** (`tracing`). Every HTTP request except `/health`
+  runs in a span carrying a server-generated request id (any client-supplied
+  `x-request-id` is discarded; ours is echoed back), the method, and the path
+  — never headers or the query string, which carry the bearer token, the
+  passphrase, and OAuth flow parameters. MCP tool calls run on rmcp's session
+  task, outside that span, so tool-level events don't inherit the request id
+  on their own. Client IPs
   appear only on rate-limit denials. Output is JSON when `LOG_FORMAT=json`
   (set in `fly.toml`) and readable text otherwise; the filter keeps Pando at
   `info` and dependencies at `warn`, so library debug output that could carry

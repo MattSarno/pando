@@ -2,7 +2,7 @@ use crate::app::AppState;
 use crate::app::web::rate_limit::{Bucket, client_ip};
 use axum::{
     Form,
-    extract::{Query, State},
+    extract::{Query, State, rejection::FormRejection},
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Redirect, Response},
 };
@@ -50,7 +50,7 @@ pub async fn authorize_form(Query(params): Query<AuthorizeQuery>) -> Response {
 pub async fn authorize_submit(
     State(app_state): State<AppState>,
     headers: HeaderMap,
-    Form(body): Form<AuthorizeSubmit>,
+    body: Result<Form<AuthorizeSubmit>, FormRejection>,
 ) -> Response {
     let ip = client_ip(&headers);
     if app_state.rate_limiter.is_locked_out(ip)
@@ -62,6 +62,11 @@ pub async fn authorize_submit(
         )
             .into_response();
     }
+
+    let Form(body) = match body {
+        Ok(body) => body,
+        Err(rejection) => return rejection.into_response(),
+    };
 
     let authorized = bool::from(
         body.passphrase

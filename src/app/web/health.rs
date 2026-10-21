@@ -5,6 +5,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
 };
 use subtle::ConstantTimeEq;
+use tracing::error;
 
 const PASSPHRASE_HEADER: &str = "X-Pando-Passphrase";
 
@@ -40,7 +41,7 @@ pub async fn readiness_check(State(state): State<AppState>, headers: HeaderMap) 
     match result {
         Ok(_) => StatusCode::OK,
         Err(error) => {
-            eprintln!("readiness: database probe failed: {error}");
+            error!(%error, "database probe failed");
             StatusCode::SERVICE_UNAVAILABLE
         }
     }

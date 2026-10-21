@@ -10,6 +10,7 @@ use rand::distr::{Alphanumeric, SampleString};
 use serde::Deserialize;
 use subtle::ConstantTimeEq;
 use time::{Duration, OffsetDateTime};
+use tracing::error;
 
 const AUTH_CODE_TTL_MINUTES: i64 = 10;
 
@@ -111,7 +112,7 @@ pub async fn authorize_submit(
                 .into_response();
         }
         Err(error) => {
-            eprintln!("authorize_submit: failed to look up client: {error}");
+            error!(%error, "failed to look up client");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     }
@@ -132,7 +133,7 @@ pub async fn authorize_submit(
     .await;
 
     if let Err(error) = insert_result {
-        eprintln!("authorize_submit: failed to insert auth code: {error}");
+        error!(%error, "failed to insert auth code");
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 

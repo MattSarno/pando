@@ -6,6 +6,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use sha2::{Digest, Sha256};
+use tracing::error;
 
 pub async fn require_bearer_token(
     State(app_state): State<AppState>,
@@ -35,7 +36,7 @@ pub async fn require_bearer_token(
         Ok(Some(_)) => next.run(request).await,
         Ok(None) => unauthorized(&app_state.public_base_url),
         Err(error) => {
-            eprintln!("require_bearer_token: failed to look up token: {error}");
+            error!(%error, "failed to look up token");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }

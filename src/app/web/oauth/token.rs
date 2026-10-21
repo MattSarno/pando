@@ -9,6 +9,7 @@ use rand::distr::{Alphanumeric, SampleString};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use time::{Duration, OffsetDateTime};
+use tracing::error;
 
 use crate::app::AppState;
 use crate::app::web::rate_limit::{Bucket, client_ip};
@@ -170,7 +171,7 @@ async fn authorization_code(grant: AuthorizationCodeGrant, app_state: &AppState)
     {
         Ok(code_challenge) => code_challenge,
         Err(error) => {
-            eprintln!("authorization_code: failed to update code_challenge: {error}");
+            error!(%error, "failed to update code_challenge");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
@@ -205,7 +206,7 @@ async fn authorization_code(grant: AuthorizationCodeGrant, app_state: &AppState)
     .await;
 
     if let Err(error) = insert_result {
-        eprintln!("authorization_code: failed to insert token: {error}");
+        error!(%error, "failed to insert token");
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
@@ -218,7 +219,7 @@ async fn refresh(grant: RefreshTokenGrant, app_state: &AppState) -> Response {
     let mut transaction = match app_state.database_pool.begin().await {
         Ok(tx) => tx,
         Err(error) => {
-            eprintln!("refresh: failed to start transaction: {error}");
+            error!(%error, "failed to start transaction");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
@@ -237,7 +238,7 @@ async fn refresh(grant: RefreshTokenGrant, app_state: &AppState) -> Response {
     let rows_affected = match revoke_result {
         Ok(result) => result.rows_affected(),
         Err(error) => {
-            eprintln!("refresh: failed to revoke old token: {error}");
+            error!(%error, "failed to revoke old token");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
@@ -267,12 +268,12 @@ async fn refresh(grant: RefreshTokenGrant, app_state: &AppState) -> Response {
     .await;
 
     if let Err(error) = insert_result {
-        eprintln!("refresh: failed to insert new token: {error}");
+        error!(%error, "failed to insert new token");
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
     if let Err(error) = transaction.commit().await {
-        eprintln!("refresh: failed to commit transaction: {error}");
+        error!(%error, "failed to commit transaction");
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 

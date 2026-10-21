@@ -5,6 +5,7 @@ use std::{
     sync::Mutex,
     time::{Duration, Instant},
 };
+use tracing::warn;
 
 const FLY_CLIENT_IP_HEADER: &str = "Fly-Client-IP";
 const MAX_TRACKED_IPS: usize = 10_000;
@@ -75,7 +76,7 @@ impl RateLimiter {
             window.count += 1;
             true
         } else {
-            eprintln!("rate_limit: {bucket:?} limit reached for {ip}");
+            warn!(?bucket, %ip, "rate limit reached");
             false
         }
     }
@@ -94,7 +95,7 @@ impl RateLimiter {
             });
 
         if locked_out {
-            eprintln!("rate_limit: passphrase lockout active for {ip}");
+            warn!(%ip, "passphrase lockout active");
         }
 
         locked_out

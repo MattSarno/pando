@@ -7,6 +7,7 @@ use crate::app::web::oauth::{
     authorization_server::auth_server, protected_resource::protected_resource,
 };
 use crate::app::{AppState, mcp::PandoTools};
+use axum::extract::Request;
 use axum::http::Uri;
 use axum::routing::post;
 use axum::{Router, middleware, routing::get};
@@ -14,6 +15,11 @@ use rmcp::transport::streamable_http_server::{
     StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
 };
 use tower::ServiceBuilder;
+use tower_http::request_id::{
+    MakeRequestUuid, PropagateRequestIdLayer, RequestId, SetRequestIdLayer,
+};
+use tower_http::trace::{DefaultOnResponse, TraceLayer};
+use tracing::{Level, Span, info_span};
 
 pub fn router(state: AppState) -> Router {
     let mcp_state = state.clone();
@@ -32,8 +38,16 @@ pub fn router(state: AppState) -> Router {
         ))
         .service(mcp_service);
 
+    let request_logging = ServiceBuilder::new()
+        .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(request_span)
+                .on_response(DefaultOnResponse::new().level(Level::INFO)),
+        )
+        .layer(PropagateRequestIdLayer::x_request_id());
+
     Router::new()
-        .route("/health", get(health_check))
         .route("/ready", get(readiness_check))
         .route("/.well-known/oauth-authorization-server", get(auth_server))
         .route(
@@ -46,6 +60,23 @@ pub fn router(state: AppState) -> Router {
         .route("/token", post(request_token))
         .with_state(state)
         .nest_service("/mcp", protected_mcp_service)
+        .layer(request_logging)
+        .route("/health", get(health_check))
+}
+
+fn request_span(request: &Request) -> Span {
+    let request_id = request
+        .extensions()
+        .get::<RequestId>()
+        .and_then(|id| id.header_value().to_str().ok())
+        .unwrap_or("unknown");
+
+    info_span!(
+        "request",
+        id = %request_id,
+        method = %request.method(),
+        path = %request.uri().path(),
+    )
 }
 
 fn allowed_mcp_hosts(public_base_url: &str) -> Vec<String> {

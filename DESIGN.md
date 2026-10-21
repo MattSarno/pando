@@ -282,6 +282,14 @@ Enforced wherever a new `key` is written (`memory_create`).
   can't wake the database. Wrong guesses count toward the same lockout as
   `/authorize`, so the probe doesn't become a second, unthrottled way to guess
   the passphrase. `/health` stays open and never touches the database.
+- **Logging is structured** (`tracing`). Every request except `/health` runs
+  in a span carrying a generated request id (echoed back as `x-request-id`),
+  the method, and the path — never headers or the query string, which carry
+  the bearer token, the passphrase, and OAuth flow parameters. Client IPs
+  appear only on rate-limit denials. Output is JSON when `LOG_FORMAT=json`
+  (set in `fly.toml`) and readable text otherwise; the filter keeps Pando at
+  `info` and dependencies at `warn`, so library debug output that could carry
+  MCP payloads stays out, and `RUST_LOG` overrides it.
 - Categorical content exclusion (no sensitive/confidential info written into memory at all) is the backstop, not the only layer.
 
 ## 9. Open Questions

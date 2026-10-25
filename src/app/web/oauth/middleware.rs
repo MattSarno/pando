@@ -8,9 +8,12 @@ use axum::{
 use sha2::{Digest, Sha256};
 use tracing::error;
 
+#[derive(Clone, Debug)]
+pub struct AuthenticatedClient(pub String);
+
 pub async fn require_bearer_token(
     State(app_state): State<AppState>,
-    request: Request,
+    mut request: Request,
     next: Next,
 ) -> Response {
     let token = request
@@ -24,16 +27,21 @@ pub async fn require_bearer_token(
     };
 
     let token_hash = hex::encode(Sha256::digest(token.as_bytes()));
-    let valid = sqlx::query_scalar::<_, i32>(
-        "SELECT 1 FROM oauth_tokens
+    let client_id = sqlx::query_scalar::<_, String>(
+        "SELECT client_id FROM oauth_tokens
         WHERE access_token_hash = $1 AND revoked_at IS NULL AND access_expires_at > now()",
     )
     .bind(&token_hash)
     .fetch_optional(&app_state.database_pool)
     .await;
 
-    match valid {
-        Ok(Some(_)) => next.run(request).await,
+    match client_id {
+        Ok(Some(client_id)) => {
+            request
+                .extensions_mut()
+                .insert(AuthenticatedClient(client_id));
+            next.run(request).await
+        }
         Ok(None) => unauthorized(&app_state.public_base_url),
         Err(error) => {
             error!(%error, "failed to look up token");

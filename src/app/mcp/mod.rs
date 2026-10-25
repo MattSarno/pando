@@ -2,6 +2,7 @@ use super::AppState;
 use rmcp::{ServerHandler, handler::server::tool::ToolRouter, tool_handler};
 use sqlx::PgPool;
 
+mod actor;
 mod memory;
 mod subject;
 mod task;

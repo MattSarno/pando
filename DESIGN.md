@@ -1,384 +1,218 @@
-# Pando Design Document
+# Pando Design
 
 ## 1. Purpose
 
-Pando is a shared memory personal-assistant backend. It exists so that Claude Code, Claude Cowork, and Claude chat all read and write the same context decisions, project state, and action items instead of each holding their own isolated memory.
+Pando is a shared memory and task backend for AI assistants. Claude Code, Claude
+chat, and Cowork read and write the same subjects, memory, and tasks, so context
+set in one surface is already there in the others, and moving to a different AI
+later costs a reconnect, not a rebuild.
 
-The core issue this solves: finishing something in one Claude surface and having to re-explain it in another. Also swapping away from claude to the next AI should be "seamless".
+Non-goals:
+- Not a multi-user product: one user, a few trusted clients.
+- Not built for scale: correctness over throughput.
+- Not a replacement for repo docs or code comments: Pando holds cross-cutting
+  personal and project context, not code.
 
-## 2. Non-Goals
+## 2. Architecture
 
-- Not a public-facing product. Single user, starting with three trusted clients.
-- Not optimized for massive scale, optimize for correctness over throughput.
-- Not replacing per-project technical docs, READMEs, or code comments, Pando holds cross-cutting personal/project context, not code itself.
+```mermaid
+flowchart LR
+  subgraph Clients
+    CC[Claude Code]
+    CH[Claude chat]
+    CW[Cowork]
+  end
+  subgraph Fly["Fly.io, one machine"]
+    R[Axum router]
+    O["OAuth endpoints<br/>register · authorize · token"]
+    B[Bearer middleware]
+    M[rmcp MCP server]
+    T[Tool layer]
+  end
+  subgraph Neon["Postgres on Neon"]
+    D[("subjects · memory_entries · tasks")]
+    A[(audit_log)]
+    K[(oauth tables)]
+  end
+  CC & CH & CW -->|MCP over HTTP| R
+  R --> O --> K
+  R -->|/mcp| B --> M --> T --> D
+  B -.->|token lookup| K
+  D -->|row trigger| A
+```
 
-## 3. Architecture Overview
+A tool call:
+1. The client calls `/mcp` with a bearer token. The middleware hashes it, looks
+   it up in `oauth_tokens`, and attaches the client id to the request. No valid
+   token gets a `401` pointing at OAuth discovery (§6).
+2. rmcp dispatches the call to a tool. Read tools query directly.
+3. Mutating tools validate, then open a transaction that sets `pando.actor` (the
+   caller's identity) and `pando.client_id`, write, and commit.
+4. The audit trigger records each changed row inside that same transaction (§4).
 
-    Claude Code  ─┐
-    Claude Chat  ─┼──▶  Pando (Axum, MCP server)  ──▶  Postgres (Neon)
-    Cowork       ─┘
+Deployment:
+- One Fly machine, always on. MCP sessions and rate-limit counters live in
+  memory, so a deploy drops sessions (clients reconnect; tokens are in
+  Postgres) and resets the counters. A second machine would split both.
+- Postgres on Neon's free plan, which suspends an idle compute. `/health` never
+  touches the database, so Fly's probes don't keep it awake; `/ready` does the
+  database check.
+- CI runs fmt, clippy (warnings as errors), and tests on every PR and push to
+  `main`; pushes to `main` deploy.
+- Migrations are sqlx files, each with a down file, applied by hand.
 
-All three clients call the same MCP tools against the same database. No sync, no reconciliation, last write wins (should only be using one at a time any way), and every client reads current state on every call.
+## 3. Data model
 
-## 4. Tech Stack
+| Table | Holds | Key |
+|---|---|---|
+| `subjects` | Anchors: projects, ongoing focuses, relationships | `slug` |
+| `memory_entries` | Durable context, optionally scoped to a subject | `id`; unique per `(scope, key)` globally and per subject |
+| `tasks` | One-off action items | `id` |
+| `audit_log` | Change history for the three tables above (§4) | `id` |
+| `oauth_clients`, `oauth_auth_codes`, `oauth_tokens` | OAuth state (§6) | |
 
-- **Language/framework:** Rust, Axum
-- **Database:** Postgres, hosted on Neon
-- **Interface:** MCP server (tools, not REST — see #6)
-- **Deployment:** containerized, on Fly.io; CI deploys every merge to `main`
+- **Subjects.** `category` is `project`, `focus`, or `relationship`, fixed at
+  creation. A CHECK ties `status` to it: a project is active, paused, or
+  finished; a focus is active or paused; a relationship has none.
+- **Memory.** `scope` is `profile`, `topic`, or `preference`. A row with a
+  `subject_id` overrides the global row with the same scope and key within that
+  subject; `memory_read` falls back from override to global.
+- **Tasks.** `status` is `open`, `in_progress`, or `done`; `priority` is `low`,
+  `medium` (default), or `high`. `source` is who created a task and `updated_by`
+  who last touched it. Subjects and memory carry only `updated_by`: for a living
+  fact, who last confirmed it matters more than who first wrote it.
+- **Deletes.** `memory_entries.subject_id` is `ON DELETE RESTRICT`, so the only
+  path that removes a subject's memory is `subject_delete`, on purpose.
+  `tasks.linked_subject` is `ON DELETE SET NULL`: tasks outlive their subject.
+- Recurring work is deliberately not a task: a recurring definition with a
+  completion history is a different shape from a one-off item.
 
-## 5. Schema
+## 4. Audit trail
 
-| Table          | Purpose                                                             | Key fields                                                                  |
-|----------------|----------------------------------------------------------------------|------------------------------------------------------------------------------|
-| subjects       | Anchors for projects, ongoing focuses, and relationships             | slug, title, category, status, summary, updated_at, updated_by              |
-| memory_entries | Durable context the AI reads to stay consistent, with per-subject overrides | id, scope, key, subject_id, description, content, updated_at, updated_by |
-| tasks          | Cross-surface action items                                          | id, text, status, priority, linked_subject, due_date, source, created_at, completed_at, updated_at, updated_by |
-| oauth_clients  | Dynamically registered OAuth clients (RFC 7591)                     | client_id, redirect_uris, client_name, created_at                          |
-| oauth_auth_codes | Short-lived, single-use authorization codes                       | code, client_id, redirect_uri, code_challenge, expires_at, used_at         |
-| oauth_tokens   | Issued access/refresh token pairs, hashed at rest                   | id, client_id, access_token_hash, refresh_token_hash, access_expires_at, refresh_expires_at, created_at, revoked_at |
-| audit_log      | Append-only change history for subjects, memory, and tasks          | id, at, actor, client_id, entity, entity_key, action, before                |
+One `AFTER INSERT OR UPDATE OR DELETE ... FOR EACH ROW` trigger on `subjects`,
+`memory_entries`, and `tasks` writes `audit_log`. Application code never writes
+it and no tool modifies it, so every committed write is recorded whatever the
+path: MCP, the Neon console, or a script.
 
-All three tables are finalized — see `migrations/0001_create_subjects.up.sql`,
-`migrations/0002_create_memory_entries.up.sql`, and
-`migrations/0003_create_tasks.up.sql` for the real DDL.
-`migrations/0004_restrict_memory_entries_subject_delete.up.sql` later changes
-`memory_entries.subject_id`'s FK from `ON DELETE CASCADE` to
-`ON DELETE RESTRICT` — see `subject_delete` in #6 for why.
-The three `oauth_*` tables are defined in
-`migrations/0005_create_oauth_tables.up.sql` — see #8 for the mechanism they
-support.
-
-`audit_log` is written only by a Postgres trigger (`migrations/0006`), never
-by application code. One `AFTER INSERT OR UPDATE OR DELETE ... FOR EACH ROW`
-trigger function is attached to `subjects`, `memory_entries`, and `tasks`, so
-every committed write is recorded regardless of path: MCP tools, the Neon
-console, or a one-off SQL script.
-- `actor` comes from the transaction-local setting `pando.actor` (see
-  "Actor and audit" in #6). If it isn't set, the trigger raises and the
-  write is rolled back: an unattributed write is refused, not recorded as
-  anonymous. Direct SQL work runs `SET pando.actor = '<who>'` first.
-- `client_id` comes from `pando.client_id`: the OAuth client whose bearer
-  token authorized the call. `actor` is what the caller says it is, and
-  `client_id` is what authentication proves. `NULL` means the write didn't
-  come through MCP, for example from the console or a script.
-- `entity` is `subject` / `memory` / `task`. `entity_key` is the row's
-  stable natural key: `slug`; `scope/key` or `scope/key@subject_id`; task
-  `id`. Neither slugs nor memory keys are renameable, so it never drifts.
-- `action` is the trigger operation (`insert` / `update` / `delete`).
-  `task_complete` is an `update` whose `before` has a non-`done` status.
+- `actor` comes from `pando.actor`. If it isn't set, the trigger raises and the
+  write rolls back: unattributed writes are refused, not recorded as anonymous.
+  Direct SQL runs `SET pando.actor = '<who>'` first.
+- `client_id` comes from `pando.client_id`, the OAuth client that authorized the
+  call; `NULL` means the write didn't come through MCP. `actor` is what the
+  caller claims; `client_id` is what authentication proves.
+- `entity` is `subject`, `memory`, or `task`. `entity_key` is the stable natural
+  key: the slug; `scope/key` or `scope/key@subject_id`; the task id.
+- `action` is `insert`, `update`, or `delete`. Completing a task is an update.
 - `before` is the full prior row as `jsonb` on update and delete, `NULL` on
-  insert. It holds content on purpose: it is how an unwatched overwrite or
-  delete gets recovered. Neon's free-tier point-in-time restore keeps only 6
-  hours and works only on root branches. No `after` is stored: the live row,
-  or the next change's `before`, already has it.
-- Retention is 30 days. The trigger deletes rows older than that on each
-  write, so `audit_list` stays a pure read. Changing the window is a
-  migration.
-- Deleting a row does not delete its history: removed content stays in
-  `audit_log` until it ages out. To remove it immediately, for example
-  something that fails the regret test, purge by hand:
-  `DELETE FROM audit_log WHERE entity = $1 AND entity_key = $2`. No MCP tool
-  can modify `audit_log`.
-- `TRUNCATE` fires no row-level triggers, so a bulk wipe is not recorded.
-- Rollout order: the actor helper ships before `0006` is applied. Setting
-  `pando.actor` is harmless without the trigger, but the trigger without
-  the helper refuses every write.
+  insert. It's how an unwatched overwrite or delete is recovered. No `after` is
+  stored: the live row, or the next change's `before`, already has it.
+- Retention is 30 days, pruned by the trigger on each write, so reads stay pure.
+- Deleting a row keeps its history until it ages out. An urgent purge is by hand:
+  `DELETE FROM audit_log WHERE entity = $1 AND entity_key = $2`.
+- `TRUNCATE` fires no row triggers, so a bulk wipe isn't recorded.
+- Code that sets the actor must ship before any trigger change that depends on
+  it; the reverse order refuses every write.
 
-Recurring/habit-style tasks were deliberately scoped out of `tasks` — planned
-as a separate `habits` + `habit_completions` pair later, since a recurring
-definition with a completion history is a different shape than a one-off
-task.
+## 5. MCP tool contract
 
-Replaces the original draft's separate `profile`, `areas`, `topics`, and
-`people` tables — those are now `memory_entries` rows (optionally scoped to
-a `subjects` row via `subject_id`) rather than distinct tables.
-
-## 6. MCP Tool Contract
-
-Each client has its own OAuth registration (see #8), but its `client_id` is
-a random opaque string, not a readable surface name. So every mutating tool
-also takes an explicit identity param — each client's own config tells it the fixed
-string to pass (e.g. `"claude-code"`, `"cowork"`, `"claude-chat"` today).
-This is intentionally unconstrained/unvalidated (no allowlist, no DB
-`CHECK`) — enforcing a known set of clients would work against #1's
-"swapping to the next AI should be seamless" goal, since a new agent or tool
-would need a schema/code change before it could write anything.
-
-`tasks` is the only table with both `source` (who created it) and
-`updated_by` (who last touched it) as separate columns, so `task_create`
-takes `source` while every other mutation takes `updated_by`. `subjects`
-and `memory_entries` have no `source` column at all — `updated_by` is used
-on both create and update for those two, since there's less value in
-remembering who first wrote a living fact/note versus who last confirmed
-it, unlike a task's provenance.
-
-**Actor and audit.** Every mutating tool runs in a transaction that first
-sets `pando.actor` (its `updated_by`, or `source` for `task_create`) and
-`pando.client_id` (from the bearer-token lookup in `require_bearer_token`,
-passed to the tool through the request's extensions), so the audit trigger
-attributes each row change, cascades included, to the caller.
-`subject_delete`'s memory deletes are recorded individually under the same
-actor, so their content stays recoverable. Rejected calls write nothing and
-are not audited.
-
-Nullable fields on `*_update` tools (`subject.summary`, `task.due_date`) are
-cleared by passing an empty string `""` — omitting the param entirely means
-"leave it alone." An LLM caller can't be relied on to reliably distinguish
-"omit this key" from "pass JSON `null`" in generated tool calls, so real
-`null` isn't used as the clear signal.
-
-`memory_entries.key` must match `^[a-z0-9]+(-[a-z0-9]+)*$` (lowercase,
-hyphenated) — same shape and same reasoning as `subjects.slug`: cheap
-insurance against casing/spacing drift (`"tz"` vs `"timezone"`) creating
-duplicate, unrelated entries for what's meant to be the same concept.
-Enforced wherever a new `key` is written (`memory_create`).
+Shared rules:
+- **Identity.** Every mutation takes a caller identity: `updated_by`, or
+  `source` on `task_create`. Each client's config names its string
+  (`claude-code`, `claude-chat`, `claude-cowork`). It's free text with no
+  allowlist, so a new agent can write without a schema change.
+- **No upserts.** Creating something that exists is an error; updating or
+  deleting something missing is an error. Silent success would hide a wrong key
+  or stale state.
+- **No no-ops.** An update must change at least one field.
+- **`""` clears.** Nullable fields (`subject.summary`, `task.due_date`) are
+  cleared with an empty string; omitting a param leaves it alone. LLM callers
+  can't reliably tell an omitted key from `null`.
+- **Slugs and keys** match `^[a-z0-9]+(-[a-z0-9]+)*$` and are permanent, so
+  casing and spacing drift can't create duplicate entries for one concept.
+- **Done is terminal.** Only `task_complete` sets it, enforced in the update
+  itself, and nothing reopens it. Text, priority, and due date stay editable.
+- Lists are ordered `updated_at desc`. Filters are strict equality and combine.
+- A rejected call writes nothing.
 
 **Subjects**
-- `subject_create(slug, title, category, summary?, updated_by)` → created row.
-  - `slug` is client-chosen, not server-generated — must match
-    `^[a-z0-9]+(-[a-z0-9]+)*$` (lowercase, hyphenated), validated at the tool
-    layer since Postgres only enforces uniqueness, not shape. Permanent once
-    set — never renameable, since `memory_entries`/`tasks` FK into it.
-  - `status` is not a param — it's set server-side, not client-controlled.
-    `'active'` for `category` in (`project`, `focus`); `NULL` for
-    `relationship` (per the `status_matches_category` check). There's no
-    real use case for creating a subject already paused/finished; use
-    `subject_update` for that after creation.
-  - Duplicate `slug` is a hard error, not an upsert — use `subject_update`
-    to change an existing subject.
-- `subject_list(slug?, category?, status?)` → matching rows, ordered
-  `updated_at desc` (whatever you're actively working on surfaces first —
-  same ordering as `task_list`). `slug` is a strict equality filter, not a
-  search — there's no dedicated `subject_read`, so this doubles as the
-  point-lookup-by-slug path rather than adding a separate single-row tool
-  for it.
-- `subject_update(slug, title?, status?, summary?, updated_by)` → updated row.
-  - `category` is immutable after creation — it determines which `status`
-    values are legal, so changing it would require re-validating status too;
-    not needed yet.
-  - `slug` itself is not renameable — it's referenced by FK from
-    `memory_entries` and `tasks`.
-  - Validating a new `status` against the row's (unchanged) `category`
-    requires reading the current row first, rather than relying on the DB
-    check to reject it blind.
-  - At least one of `title` / `status` / `summary` must be provided — a
-    call with none of them is rejected rather than allowed as a silent
-    no-op that only bumps `updated_at`/`updated_by`.
-- `subject_delete(slug, updated_by)` → void.
-  - In one transaction: deletes every `memory_entries` row scoped to it,
-    then the `subjects` row itself. Any `tasks` linked to it survive with
-    `linked_subject` set to `NULL` (existing `ON DELETE SET NULL`, no
-    explicit step needed). No `cascade_memory` opt-in/failure mode — taking
-    the scoped memory with it is the expected behavior of deleting a
-    subject, not something worth gating behind a param nobody would leave
-    off.
-  - `migrations/0004` makes the memory FK `ON DELETE RESTRICT` specifically
-    so nothing *outside* this tool can silently cascade or orphan that
-    data — this transaction is the one deliberate, documented place that's
-    allowed to.
-  - `updated_by` has nowhere to persist on the deleted row; it is recorded
-    as `actor` on the `audit_log` row, alongside the full deleted row.
+
+| Tool | Params | Notes |
+|---|---|---|
+| `subject_create` | `slug, title, category, summary?, updated_by` | Status is set server-side: `active`, or none for a relationship |
+| `subject_list` | `slug?, category?, status?` | `slug` doubles as the point lookup |
+| `subject_update` | `slug, title?, status?, summary?, updated_by` | Status is validated against the subject's category |
+| `subject_delete` | `slug, updated_by` | Deletes the subject's memory in the same transaction; linked tasks survive unlinked |
 
 **Memory**
-- `memory_create(scope, key, content, description, subject_id?, updated_by)`
-  → created row.
-  - `key` must match the kebab-case pattern (see the shared convention
-    note above) — this is the tool that actually enforces it, since it's
-    the only place a new `key` gets written; `memory_update` never changes
-    it.
-  - `content` and `description` are both required and must be non-empty —
-    a memory entry with nothing in it or no way to find it later via
-    `memory_search` isn't useful yet, so neither is optional the way they
-    can be left blank on `subjects`/`tasks`.
-  - Duplicate `(scope, key)` (or `(scope, key, subject_id)` when given) is
-    a hard error, not an upsert — same pattern as `subject_create`. Use
-    `memory_update` to change an existing entry.
-  - Errors if `subject_id` is given but doesn't reference an existing
-    subject.
-- `memory_read(scope, key, subject_id?)` → matching row (`content`,
-  `description`, `updated_at`, `updated_by`), or not-found (empty result,
-  not an error — "no memory of X yet" is a normal case).
-  - If `subject_id` is given but no override row exists for it, falls back
-    to the global default (`subject_id IS NULL`) for that `(scope, key)`.
-    Returns only the resolved value, not both override and default.
-- `memory_update(scope, key, subject_id?, content?, description?,
-  updated_by)` → updated row.
-  - `key` and `subject_id` together select the target row (matched with
-    `IS NOT DISTINCT FROM`, so `NULL` correctly targets the global-default
-    row instead of matching nothing) — neither is editable here, same
-    "not renameable" reasoning as `subjects.slug`.
-  - At least one of `content` / `description` must be provided — same
-    no-op rejection rule as `subject_update`/`task_update`. Whichever is
-    omitted keeps its existing value.
-  - Errors if no row matches the target, rather than creating one — a
-    missing target most likely means a wrong `key`, and silently
-    upserting would hide that.
-- `memory_delete(scope, key, subject_id?, updated_by)` → void.
-  - Targets the exact row the same way `memory_update` does — no fallback
-    like `memory_read` has, so deleting an override can never accidentally
-    take out the global default or vice versa.
-  - Errors if no row matches the target — same reasoning as
-    `memory_update`.
-  - `updated_by` recorded as `actor` on the `audit_log` row, same as
-    `subject_delete`.
-- `memory_search(query, scope?, subject_id?)` → matching rows. Matches
-  `query` against `key`, `description`, and `content` via `ILIKE`
-  (full-text search is more than this needs at personal scale).
-  `subject_id`, when given, is a strict equality filter — only that
-  subject's own override rows, not global defaults folded in. Unlike
-  `memory_read`, no fallback here.
-- `memory_list(scope?, subject_id?)` → matching rows, ordered `updated_at
-  desc` (same ordering as `subject_list`/`task_list`). No text match, kept
-  as a separate tool from `memory_search` rather than making `query`
-  optional there — browsing and searching are different intents even
-  though the underlying filters overlap. `subject_id` is the same strict
-  equality filter as `memory_search`.
+
+| Tool | Params | Notes |
+|---|---|---|
+| `memory_create` | `scope, key, content, description, subject_id?, updated_by` | Content and description required; subject must exist |
+| `memory_read` | `scope, key, subject_id?` | Override, else global default, else `null` |
+| `memory_update` | `scope, key, subject_id?, content?, description?, updated_by` | Targets the exact row (`IS NOT DISTINCT FROM`), no fallback |
+| `memory_delete` | `scope, key, subject_id?, updated_by` | Exact row, no fallback |
+| `memory_search` | `query, scope?, subject_id?` | `ILIKE` over key, description, and content; subject filter is strict |
+| `memory_list` | `scope?, subject_id?` | Browse; subject filter is strict |
 
 **Tasks**
-- `task_create(text, source, priority?, due_date?, linked_subject?)` →
-  created row. `status` always starts `'open'`; `source` also seeds the
-  initial `updated_by`.
-- `task_update(id, updated_by, status?, priority?, due_date?, text?)` →
-  updated row.
-  - `done` is a terminal state. `status` here only accepts `'open'` /
-    `'in_progress'`, and only while the task isn't already `done` — reaching
-    `done` is exclusively through `task_complete`, and there's no path back
-    out of it. A task marked done by mistake, or needing more work, gets a
-    new `task_create` rather than being reopened. This also means
-    `completed_at` never needs to be touched here — it's set once by
-    `task_complete` and never cleared.
-  - `linked_subject` is fixed at creation and not editable here — same
-    "not renameable/relinkable" reasoning as `subjects.slug`.
-  - At least one of `status` / `priority` / `due_date` / `text` must be
-    provided — same no-op rejection rule as `subject_update`.
-- `task_complete(id, updated_by)` → updated row. Sets `status = 'done'` and
-  `completed_at = now()`. Errors if the task is already `done` — same
-  reasoning as `memory_delete`: calling it on something already in the
-  target state most likely means the caller has stale info (e.g. two
-  clients racing, or forgot it already completed this), and silently
-  succeeding would hide that.
-- `task_delete(id, updated_by)` → void.
-  - Errors if `id` doesn't exist. Nothing else FKs into `tasks.id`, so
-    unlike `subject_delete` there's no cascade to worry about.
-  - For fixing mistakes (junk/duplicate/accidentally-created tasks) — not
-    an alternative to `task_complete`, which already covers anything
-    genuinely finished and preserves it as history.
-- `task_list(id?, status?, stale_days?, linked_subject?)` → matching rows,
-  ordered `updated_at desc`. `id` is a strict equality filter — same
-  point-lookup reasoning as `subject_list`'s `slug`, no dedicated
-  `task_read` since `task_update`/`task_complete`/`task_delete` already
-  return the full row on mutation. `stale_days` is independent of `status` — it
-  only means `updated_at` older than `now() - stale_days`, ANDed with
-  whatever `status`/`linked_subject` filters are also given. Want old open
-  work? Pass `status: 'open', stale_days: 30`. Want old completed tasks for
-  archival? Pass `status: 'done', stale_days: 90`. Composable rather than
-  baking in "not done," which also avoids the `status: 'done'` +
-  `stale_days` contradiction a baked-in version would hit.
+
+| Tool | Params | Notes |
+|---|---|---|
+| `task_create` | `text, source, priority?, due_date?, linked_subject?` | Starts `open`; `source` also seeds `updated_by` |
+| `task_list` | `id?, status?, stale_days?, linked_subject?` | `stale_days`: not updated in N days; combines with `status` |
+| `task_update` | `id, updated_by, status?, priority?, due_date?, text?` | Status only `open` or `in_progress`, never on a done task; subject link is fixed |
+| `task_complete` | `id, updated_by` | Sets `done` and `completed_at`; errors if already done |
+| `task_delete` | `id, updated_by` | For mistakes; finished work uses `task_complete` |
 
 **Audit**
-- `audit_list(since?, after_id?, entity?, entity_key?, actor?, exclude_actor?,
-  limit?, include_before?)` → matching `audit_log` rows.
-  - Without `after_id`: newest first, `at desc, id desc`. `id` breaks ties
-    between rows written in one transaction, which share `at`.
-  - With `after_id`: rows with `id > after_id`, oldest first, `id asc`.
-    Used for paging (pass the last `id` of the previous page) and for exact
-    catch-up within a session. `since` (RFC 3339) is the cross-session
-    "recent changes" filter, since nothing stores a cursor between sessions.
-  - Known gap: ids are assigned when a write starts, not when it commits,
-    so overlapping writes can become visible out of order and an `after_id`
-    reader can skip one. Accepted at single-user scale.
-  - `entity`, `entity_key`, and `actor` are strict equality filters;
-    `exclude_actor` drops one actor's rows ("what did everyone else do?").
-    All compose like `task_list`'s.
-  - `limit` defaults to 50, capped at 200.
-  - `before` is omitted unless `include_before: true`.
-  - Each row also carries `client_name`, joined from `oauth_clients` and
-    cut to 64 characters. It is the name the client sent at `/register`,
-    which is unauthenticated, so it is a self-reported label like `actor`;
-    `client_id` is the identity authentication proves. `NULL` if the client
-    has since been removed.
-  - Recovery restores content, not identity: read the `before`, then
-    `memory_update` / `subject_update` / `task_create` with it. That write is
-    itself audited. A re-created task gets a new id and new dates, and a
-    re-created subject a fresh `updated_at`. No restore tool.
-  - Read-only. Nothing in the MCP surface writes to or deletes from
-    `audit_log`.
 
-## 7. Build Order
+| Tool | Params | Notes |
+|---|---|---|
+| `audit_list` | `since?, after_id?, entity?, entity_key?, actor?, exclude_actor?, limit?, include_before?` | Newest first; with `after_id`, oldest first after that id |
 
-1. Finalize schema + MCP tool contract (this doc)
-2. Bare Axum + Postgres service, no auth, running locally
-3. Wire up one client end-to-end (Claude Code)
-4. Add Cowork, then chat as a connector
-5. Security hardening (see #8) — last, once shape is proven
+- `limit` defaults to 50, capped at 200. `before` is returned only with
+  `include_before`.
+- Each row carries `client_name`, joined from `oauth_clients`. It's the name sent
+  at registration, which is unauthenticated, so it's a label like `actor`.
+- Ids are assigned when a write starts, not when it commits, so an `after_id`
+  reader can occasionally miss an overlapping write.
+- There's no restore tool: recovery re-applies a `before` through the normal
+  update tools, and that write is audited too.
 
-## 8. Security
+## 6. Security
 
-- **No credentials/secrets ever stored** — categorical rule, no exceptions, regardless of other protections in place.
-- Chat requires the MCP endpoint to be reachable over the public internet. Full network isolation is not viable for the whole system.
-- **Primary defense: self-hosted OAuth 2.1.** Pando is both the authorization
-  server and the resource server — no third-party IdP, since there's exactly
-  one resource owner and no multi-tenant problem to solve.
-  - Clients register themselves via Dynamic Client Registration (RFC 7591,
-    `POST /register`) rather than being provisioned by hand. All clients are
-    public (no `client_secret` — Chat and Code both run in environments that
-    can't keep one confidential), so PKCE (RFC 7636, `S256` only) is required
-    on every authorization-code exchange. Registration stays unauthenticated
-    because the clients that use it register themselves programmatically and
-    have no way to present a secret; it is rate-limited per client IP instead,
-    and stale registrations are a retention concern rather than an access one.
-  - The one human approval gate is a passphrase-protected `/authorize` page.
-    No login session/cookie — every authorization (or consent refresh)
-    re-enters the passphrase, which is checked with a constant-time
-    comparison since it's evaluated over the network.
-  - Access and refresh tokens are opaque random strings; only their SHA-256
-    hashes are ever stored, so a compromised database can't be used to
-    reconstruct a working credential. Access tokens are short-lived (roughly
-    an hour); refresh tokens rotate on every use — each refresh invalidates
-    the token that was just spent, so a copied refresh token stops working
-    the moment the legitimate client uses its own (now-superseded) copy.
-  - An unauthenticated request to `/mcp` gets a `401` carrying a
-    `WWW-Authenticate` header pointing at
-    `/.well-known/oauth-protected-resource`, which in turn points at
-    `/.well-known/oauth-authorization-server` — the whole flow (where to
-    register, authorize, and get a token) is discoverable by a client from
-    nothing but the `/mcp` URL.
-- **Secondary: per-IP rate limiting + logging.** `/register`, `/token`, and
-  `/authorize` are rate-limited per client IP, taken from Fly's
-  `Fly-Client-IP` header, and repeated wrong passphrases lock that IP out for
-  a period. Limit state is held in memory: there is one machine, and a restart
-  resetting it only briefly widens the window. The first denial per IP and
-  window is logged with its bucket and IP; later ones in the same window are
-  not, so repeated requests can't bury the warnings. Limits are checked before the
-  request body is parsed, so malformed requests count too. Thresholds come
-  from environment variables and are
-  deliberately recorded neither here nor in source — the repo is public, and
-  published numbers let a caller tune requests to stay just under them.
-- `/ready`, the database probe, requires the admin passphrase in an
-  `X-Pando-Passphrase` header, compared in constant time, so anonymous traffic
-  can't wake the database. Wrong guesses count toward the same lockout as
-  `/authorize`, so the probe doesn't become a second, unthrottled way to guess
-  the passphrase. `/health` stays open and never touches the database.
-- **Logging is structured** (`tracing`). Every HTTP request except `/health`
-  runs in a span carrying a server-generated request id (any client-supplied
-  `x-request-id` is discarded; ours is echoed back), the method, and the path
-  — never headers or the query string, which carry the bearer token, the
-  passphrase, and OAuth flow parameters. MCP tool calls run on rmcp's session
-  task, outside that span, so tool-level events don't inherit the request id
-  on their own. Client IPs
-  appear only on rate-limit denials. Output is JSON when `LOG_FORMAT=json`
-  (set in `fly.toml`) and readable text otherwise; the filter keeps Pando at
-  `info` and dependencies at `warn`, so library debug output that could carry
-  MCP payloads stays out, and `RUST_LOG` overrides it.
-- Categorical content exclusion (no sensitive/confidential info written into memory at all) is the backstop, not the only layer.
-
-## 9. Open Questions
-
-- None currently open.
-
-## 10. Repo / Licensing
-- Repo name: `pando`
-- Visibility: public
-- License: AGPL
-- Nothing environment-specific or personal (`.env`, seed data, tokens) is ever committed. See `.gitignore` before first commit.
+- **No credentials or secrets are ever stored in Pando.** Excluding sensitive
+  content is the backstop, not the only layer.
+- Chat needs a public endpoint, so full network isolation isn't an option.
+- **Self-hosted OAuth 2.1.** Pando is both authorization and resource server;
+  with one resource owner, a third-party identity provider solves nothing.
+  - Clients self-register at `/register` (RFC 7591). All are public clients
+    with no secret, so PKCE (`S256`) is required on every code exchange.
+  - The one human gate is a passphrase-protected `/authorize` page: compared in
+    constant time, no session cookie, entered on every authorization.
+  - Tokens are opaque; only their SHA-256 hashes are stored. Access tokens live
+    about an hour; refresh tokens rotate on every use.
+  - `/mcp` answers an unauthenticated call with a `401` whose
+    `WWW-Authenticate` points at `/.well-known/oauth-protected-resource`, which
+    points at `/.well-known/oauth-authorization-server`. A client needs only
+    the `/mcp` URL.
+- **Rate limiting.** `/register`, `/token`, and the `/authorize` form submit are
+  limited per client IP (from `Fly-Client-IP`), and repeated wrong passphrases
+  lock the IP out. Limits are checked before the body is parsed and held in
+  memory. Thresholds come from environment variables and are recorded neither
+  here nor in source: the repo is public.
+- **`/ready`** requires the passphrase in `X-Pando-Passphrase`, compared in
+  constant time, and shares the lockout. `/health` is open and never touches the
+  database.
+- **Logging** uses `tracing`. Every request except `/health` runs in a span with
+  a server-generated request id (any client-supplied one is dropped; ours is
+  echoed back), the method, and the path. Never headers or the query string:
+  they carry the bearer token, the passphrase, and OAuth parameters. Tool calls
+  run on rmcp's session task, outside that span. Client IPs appear only on
+  rate-limit denials. Output is JSON when `LOG_FORMAT=json`, text when `text` or
+  unset; any other value stops startup. Pando and `tower_http` log at `info`,
+  other crates at `warn`; `RUST_LOG` overrides.
+- rmcp's allowed-hosts check (DNS-rebinding protection) stays on; the server
+  adds `PUBLIC_BASE_URL`'s host to the loopback defaults.
+- Nothing personal or environment-specific is committed: `.env*` (except
+  `.env.example`), seed data, and tokens stay out of the repo.

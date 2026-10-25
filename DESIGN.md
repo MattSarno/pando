@@ -37,6 +37,7 @@ All three clients call the same MCP tools against the same database. No sync, no
 | oauth_clients  | Dynamically registered OAuth clients (RFC 7591)                     | client_id, redirect_uris, client_name, created_at                          |
 | oauth_auth_codes | Short-lived, single-use authorization codes                       | code, client_id, redirect_uri, code_challenge, expires_at, used_at         |
 | oauth_tokens   | Issued access/refresh token pairs, hashed at rest                   | id, client_id, access_token_hash, refresh_token_hash, access_expires_at, refresh_expires_at, created_at, revoked_at |
+| audit_log      | Append-only change history for subjects, memory, and tasks          | id, at, actor, client_id, entity, entity_key, action, before                |
 
 All three tables are finalized — see `migrations/0001_create_subjects.up.sql`,
 `migrations/0002_create_memory_entries.up.sql`, and
@@ -47,6 +48,42 @@ All three tables are finalized — see `migrations/0001_create_subjects.up.sql`,
 The three `oauth_*` tables are defined in
 `migrations/0005_create_oauth_tables.up.sql` — see #8 for the mechanism they
 support.
+
+`audit_log` is written only by a Postgres trigger (`migrations/0006`), never
+by application code. One `AFTER INSERT OR UPDATE OR DELETE ... FOR EACH ROW`
+trigger function is attached to `subjects`, `memory_entries`, and `tasks`, so
+every committed write is recorded regardless of path: MCP tools, the Neon
+console, or a one-off SQL script.
+- `actor` comes from the transaction-local setting `pando.actor` (see
+  "Actor and audit" in #6). If it isn't set, the trigger raises and the
+  write is rolled back: an unattributed write is refused, not recorded as
+  anonymous. Direct SQL work runs `SET pando.actor = '<who>'` first.
+- `client_id` comes from `pando.client_id`: the OAuth client whose bearer
+  token authorized the call. `actor` is what the caller says it is, and
+  `client_id` is what authentication proves. `NULL` means the write didn't
+  come through MCP, for example from the console or a script.
+- `entity` is `subject` / `memory` / `task`. `entity_key` is the row's
+  stable natural key: `slug`; `scope/key` or `scope/key@subject_id`; task
+  `id`. Neither slugs nor memory keys are renameable, so it never drifts.
+- `action` is the trigger operation (`insert` / `update` / `delete`).
+  `task_complete` is an `update` whose `before` has a non-`done` status.
+- `before` is the full prior row as `jsonb` on update and delete, `NULL` on
+  insert. It holds content on purpose: it is how an unwatched overwrite or
+  delete gets recovered. Neon's free-tier point-in-time restore keeps only 6
+  hours and works only on root branches. No `after` is stored: the live row,
+  or the next change's `before`, already has it.
+- Retention is 30 days. The trigger deletes rows older than that on each
+  write, so `audit_list` stays a pure read. Changing the window is a
+  migration.
+- Deleting a row does not delete its history: removed content stays in
+  `audit_log` until it ages out. To remove it immediately, for example
+  something that fails the regret test, purge by hand:
+  `DELETE FROM audit_log WHERE entity = $1 AND entity_key = $2`. No MCP tool
+  can modify `audit_log`.
+- `TRUNCATE` fires no row-level triggers, so a bulk wipe is not recorded.
+- Rollout order: the actor helper ships before `0006` is applied. Setting
+  `pando.actor` is harmless without the trigger, but the trigger without
+  the helper refuses every write.
 
 Recurring/habit-style tasks were deliberately scoped out of `tasks` — planned
 as a separate `habits` + `habit_completions` pair later, since a recurring
@@ -59,9 +96,9 @@ a `subjects` row via `subject_id`) rather than distinct tables.
 
 ## 6. MCP Tool Contract
 
-Every client authenticates with the same credential (see #8), so the server
-can't tell clients apart from auth alone. Instead, every mutating tool takes
-an explicit identity param — each client's own config tells it the fixed
+Each client has its own OAuth registration (see #8), but its `client_id` is
+a random opaque string, not a readable surface name. So every mutating tool
+also takes an explicit identity param — each client's own config tells it the fixed
 string to pass (e.g. `"claude-code"`, `"cowork"`, `"claude-chat"` today).
 This is intentionally unconstrained/unvalidated (no allowlist, no DB
 `CHECK`) — enforcing a known set of clients would work against #1's
@@ -75,6 +112,15 @@ and `memory_entries` have no `source` column at all — `updated_by` is used
 on both create and update for those two, since there's less value in
 remembering who first wrote a living fact/note versus who last confirmed
 it, unlike a task's provenance.
+
+**Actor and audit.** Every mutating tool runs in a transaction that first
+sets `pando.actor` (its `updated_by`, or `source` for `task_create`) and
+`pando.client_id` (from the bearer-token lookup in `require_bearer_token`,
+passed to the tool through the request's extensions), so the audit trigger
+attributes each row change, cascades included, to the caller.
+`subject_delete`'s memory deletes are recorded individually under the same
+actor, so their content stays recoverable. Rejected calls write nothing and
+are not audited.
 
 Nullable fields on `*_update` tools (`subject.summary`, `task.due_date`) are
 cleared by passing an empty string `""` — omitting the param entirely means
@@ -131,9 +177,8 @@ Enforced wherever a new `key` is written (`memory_create`).
     so nothing *outside* this tool can silently cascade or orphan that
     data — this transaction is the one deliberate, documented place that's
     allowed to.
-  - `updated_by` has nowhere to persist to once the row's gone, but is kept
-    and logged (see #8's logging line) so there's still a record of who
-    deleted it.
+  - `updated_by` has nowhere to persist on the deleted row; it is recorded
+    as `actor` on the `audit_log` row, alongside the full deleted row.
 
 **Memory**
 - `memory_create(scope, key, content, description, subject_id?, updated_by)`
@@ -175,7 +220,8 @@ Enforced wherever a new `key` is written (`memory_create`).
     take out the global default or vice versa.
   - Errors if no row matches the target — same reasoning as
     `memory_update`.
-  - `updated_by` logged same as `subject_delete`, nothing to persist it to.
+  - `updated_by` recorded as `actor` on the `audit_log` row, same as
+    `subject_delete`.
 - `memory_search(query, scope?, subject_id?)` → matching rows. Matches
   `query` against `key`, `description`, and `content` via `ILIKE`
   (full-text search is more than this needs at personal scale).
@@ -229,6 +275,30 @@ Enforced wherever a new `key` is written (`memory_create`).
   archival? Pass `status: 'done', stale_days: 90`. Composable rather than
   baking in "not done," which also avoids the `status: 'done'` +
   `stale_days` contradiction a baked-in version would hit.
+
+**Audit**
+- `audit_list(since?, after_id?, entity?, entity_key?, actor?, exclude_actor?,
+  limit?, include_before?)` → matching `audit_log` rows.
+  - Without `after_id`: newest first, `at desc, id desc`. `id` breaks ties
+    between rows written in one transaction, which share `at`.
+  - With `after_id`: rows with `id > after_id`, oldest first, `id asc`.
+    Used for paging (pass the last `id` of the previous page) and for exact
+    catch-up within a session. `since` (RFC 3339) is the cross-session
+    "recent changes" filter, since nothing stores a cursor between sessions.
+  - Known gap: ids are assigned when a write starts, not when it commits,
+    so overlapping writes can become visible out of order and an `after_id`
+    reader can skip one. Accepted at single-user scale.
+  - `entity`, `entity_key`, and `actor` are strict equality filters;
+    `exclude_actor` drops one actor's rows ("what did everyone else do?").
+    All compose like `task_list`'s.
+  - `limit` defaults to 50, capped at 200.
+  - `before` is omitted unless `include_before: true`.
+  - Recovery restores content, not identity: read the `before`, then
+    `memory_update` / `subject_update` / `task_create` with it. That write is
+    itself audited. A re-created task gets a new id and new dates, and a
+    re-created subject a fresh `updated_at`. No restore tool.
+  - Read-only. Nothing in the MCP surface writes to or deletes from
+    `audit_log`.
 
 ## 7. Build Order
 

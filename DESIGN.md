@@ -293,6 +293,11 @@ Enforced wherever a new `key` is written (`memory_create`).
     All compose like `task_list`'s.
   - `limit` defaults to 50, capped at 200.
   - `before` is omitted unless `include_before: true`.
+  - Each row also carries `client_name`, joined from `oauth_clients` and
+    cut to 64 characters. It is the name the client sent at `/register`,
+    which is unauthenticated, so it is a self-reported label like `actor`;
+    `client_id` is the identity authentication proves. `NULL` if the client
+    has since been removed.
   - Recovery restores content, not identity: read the `before`, then
     `memory_update` / `subject_update` / `task_create` with it. That write is
     itself audited. A re-created task gets a new id and new dates, and a

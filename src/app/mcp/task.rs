@@ -19,8 +19,8 @@ use sqlx::types::time::{Date, OffsetDateTime};
 use time::format_description::well_known::Iso8601;
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, sqlx::Type)]
-#[serde(rename_all = "lowercase")]
-#[sqlx(type_name = "text", rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
 enum Status {
     Open,
     InProgress,
@@ -69,8 +69,8 @@ struct TaskListParams {
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, sqlx::Type)]
-#[serde(rename_all = "lowercase")]
-#[sqlx(type_name = "text", rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
 enum UpdatableStatus {
     Open,
     InProgress,

@@ -3,6 +3,7 @@ use rmcp::{ServerHandler, handler::server::tool::ToolRouter, tool_handler};
 use sqlx::PgPool;
 
 mod actor;
+mod audit;
 mod memory;
 mod subject;
 mod task;
@@ -19,7 +20,10 @@ impl PandoTools {
     pub fn new(state: AppState) -> Self {
         Self {
             state,
-            tool_router: Self::subjects_router() + Self::memory_router() + Self::tasks_router(),
+            tool_router: Self::subjects_router()
+                + Self::memory_router()
+                + Self::tasks_router()
+                + Self::audit_router(),
         }
     }
 

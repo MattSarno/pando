@@ -1,9 +1,14 @@
 use crate::app::mcp::PandoTools;
+use crate::app::mcp::actor::{begin_as, commit};
 use crate::app::mcp::tool_errors::{db_error, error_result};
 use crate::app::mcp::validation::validate_key;
+use axum::http::request::Parts;
 use rmcp::{
-    ErrorData, handler::server::wrapper::Parameters, model::CallToolResult, serde_json::json, tool,
-    tool_router,
+    ErrorData,
+    handler::server::{tool::Extension, wrapper::Parameters},
+    model::CallToolResult,
+    serde_json::json,
+    tool, tool_router,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -56,7 +61,6 @@ struct SubjectListParams {
     status: Option<Status>,
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize, JsonSchema)]
 struct SubjectDeleteParams {
     slug: String,
@@ -97,6 +101,7 @@ impl PandoTools {
     async fn subject_create(
         &self,
         Parameters(body): Parameters<SubjectCreateParams>,
+        Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         if let Err(message) = validate_key("slug", &body.slug) {
             return Ok(error_result(message));
@@ -108,6 +113,7 @@ impl PandoTools {
 
         let status = default_status(&body.category);
         let summary = body.summary.filter(|summary| !summary.trim().is_empty());
+        let mut transaction = begin_as(self.database_pool(), &parts, &body.updated_by).await?;
         let result = sqlx::query_as::<_, Subject>(
             "INSERT INTO subjects (slug, title, category, status, summary, updated_by)
             VALUES ($1, $2, $3, $4, $5, $6)
@@ -119,11 +125,14 @@ impl PandoTools {
         .bind(&status)
         .bind(&summary)
         .bind(&body.updated_by)
-        .fetch_one(self.database_pool())
+        .fetch_one(&mut *transaction)
         .await;
 
         match result {
-            Ok(subject) => Ok(CallToolResult::structured(json!(subject))),
+            Ok(subject) => {
+                commit(transaction).await?;
+                Ok(CallToolResult::structured(json!(subject)))
+            }
             Err(sqlx::Error::Database(db_err))
                 if db_err.is_unique_violation()
                     && db_err.constraint() == Some(SLUG_PKEY_CONSTRAINT) =>
@@ -162,6 +171,7 @@ impl PandoTools {
     async fn subject_update(
         &self,
         Parameters(body): Parameters<SubjectUpdateParams>,
+        Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         if body.title.is_none() && body.status.is_none() && body.summary.is_none() {
             return Ok(error_result(
@@ -201,6 +211,7 @@ impl PandoTools {
 
         let summary_provided = body.summary.is_some();
         let summary = body.summary.filter(|summary| !summary.trim().is_empty());
+        let mut transaction = begin_as(self.database_pool(), &parts, &body.updated_by).await?;
         let result = sqlx::query_as::<_, Subject>(
             "UPDATE subjects
              SET title = COALESCE($2, title),
@@ -217,11 +228,14 @@ impl PandoTools {
         .bind(summary_provided)
         .bind(&summary)
         .bind(&body.updated_by)
-        .fetch_optional(self.database_pool())
+        .fetch_optional(&mut *transaction)
         .await;
 
         match result {
-            Ok(Some(subject)) => Ok(CallToolResult::structured(json!(subject))),
+            Ok(Some(subject)) => {
+                commit(transaction).await?;
+                Ok(CallToolResult::structured(json!(subject)))
+            }
             Ok(None) => Ok(error_result(format!("slug '{}' does not exist", body.slug))),
             Err(error) => Err(db_error("failed to update subject", error)),
         }
@@ -231,11 +245,9 @@ impl PandoTools {
     async fn subject_delete(
         &self,
         Parameters(body): Parameters<SubjectDeleteParams>,
+        Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        let mut transaction = match self.database_pool().begin().await {
-            Ok(transaction) => transaction,
-            Err(error) => return Err(db_error("failed to start transaction", error)),
-        };
+        let mut transaction = begin_as(self.database_pool(), &parts, &body.updated_by).await?;
 
         if let Err(error) = sqlx::query("DELETE FROM memory_entries WHERE subject_id = $1")
             .bind(&body.slug)
@@ -259,9 +271,7 @@ impl PandoTools {
             return Ok(error_result(format!("slug '{}' does not exist", body.slug)));
         }
 
-        if let Err(error) = transaction.commit().await {
-            return Err(db_error("failed to commit transaction", error));
-        }
+        commit(transaction).await?;
 
         Ok(CallToolResult::structured(
             json!({ "deleted": { "slug": body.slug } }),

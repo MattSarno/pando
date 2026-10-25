@@ -1,9 +1,14 @@
+use crate::app::mcp::actor::{begin_as, commit};
 use crate::app::mcp::tool_errors::db_error;
 use crate::app::mcp::validation::{escape_like_wildcards, validate_key};
 use crate::app::mcp::{PandoTools, tool_errors::error_result};
+use axum::http::request::Parts;
 use rmcp::serde_json::json;
 use rmcp::{
-    ErrorData, handler::server::wrapper::Parameters, model::CallToolResult, tool, tool_router,
+    ErrorData,
+    handler::server::{tool::Extension, wrapper::Parameters},
+    model::CallToolResult,
+    tool, tool_router,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -70,7 +75,6 @@ struct MemoryUpdateParams {
     updated_by: String,
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize, JsonSchema)]
 struct MemoryDeleteParams {
     scope: Scope,
@@ -85,6 +89,7 @@ impl PandoTools {
     async fn memory_create(
         &self,
         Parameters(body): Parameters<MemoryCreateParams>,
+        Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         if let Err(message) = validate_key("key", &body.key) {
             return Ok(error_result(message));
@@ -104,6 +109,7 @@ impl PandoTools {
             return Ok(error_result("description must not be empty"));
         }
 
+        let mut transaction = begin_as(self.database_pool(), &parts, &body.updated_by).await?;
         let result = sqlx::query_as::<_, MemoryEntry>(
             "INSERT INTO memory_entries (scope, key, subject_id, description, content, updated_by)
             VALUES ($1, $2, $3, $4, $5, $6)
@@ -115,11 +121,14 @@ impl PandoTools {
         .bind(&body.description)
         .bind(&body.content)
         .bind(&body.updated_by)
-        .fetch_one(self.database_pool())
+        .fetch_one(&mut *transaction)
         .await;
 
         match result {
-            Ok(memory) => Ok(CallToolResult::structured(json!(memory))),
+            Ok(memory) => {
+                commit(transaction).await?;
+                Ok(CallToolResult::structured(json!(memory)))
+            }
             Err(sqlx::Error::Database(db_err))
                 if db_err.is_unique_violation()
                     && matches!(
@@ -228,6 +237,7 @@ impl PandoTools {
     async fn memory_update(
         &self,
         Parameters(body): Parameters<MemoryUpdateParams>,
+        Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         if body.content.is_none() && body.description.is_none() {
             return Ok(error_result(
@@ -247,6 +257,7 @@ impl PandoTools {
             return Ok(error_result("description must not be empty"));
         }
 
+        let mut transaction = begin_as(self.database_pool(), &parts, &body.updated_by).await?;
         let result = sqlx::query_as::<_, MemoryEntry>(
             "UPDATE memory_entries
             SET content = COALESCE($4, content),
@@ -264,11 +275,14 @@ impl PandoTools {
         .bind(&body.content)
         .bind(&body.description)
         .bind(&body.updated_by)
-        .fetch_optional(self.database_pool())
+        .fetch_optional(&mut *transaction)
         .await;
 
         match result {
-            Ok(Some(memory)) => Ok(CallToolResult::structured(json!(memory))),
+            Ok(Some(memory)) => {
+                commit(transaction).await?;
+                Ok(CallToolResult::structured(json!(memory)))
+            }
             Ok(None) => Ok(error_result(
                 "no memory entry exists for that scope/key/subject",
             )),
@@ -280,7 +294,9 @@ impl PandoTools {
     async fn memory_delete(
         &self,
         Parameters(body): Parameters<MemoryDeleteParams>,
+        Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
+        let mut transaction = begin_as(self.database_pool(), &parts, &body.updated_by).await?;
         let result = sqlx::query(
             "DELETE FROM memory_entries
             WHERE scope = $1
@@ -290,7 +306,7 @@ impl PandoTools {
         .bind(&body.scope)
         .bind(&body.key)
         .bind(&body.subject_id)
-        .execute(self.database_pool())
+        .execute(&mut *transaction)
         .await;
 
         let deleted = match result {
@@ -303,6 +319,8 @@ impl PandoTools {
                 "no memory entry exists for that scope/key/subject",
             ));
         }
+
+        commit(transaction).await?;
 
         Ok(CallToolResult::structured(json!({
             "deleted": {

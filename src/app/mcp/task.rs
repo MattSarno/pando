@@ -1,11 +1,16 @@
 use crate::app::mcp::{
     PandoTools,
+    actor::{begin_as, commit},
     tool_errors::{db_error, error_result},
     validation::validate_key,
 };
+use axum::http::request::Parts;
 use rmcp::{
-    ErrorData, handler::server::wrapper::Parameters, model::CallToolResult, serde_json::json, tool,
-    tool_router,
+    ErrorData,
+    handler::server::{tool::Extension, wrapper::Parameters},
+    model::CallToolResult,
+    serde_json::json,
+    tool, tool_router,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -87,7 +92,6 @@ struct TaskCompleteParams {
     updated_by: String,
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize, JsonSchema)]
 struct TaskDeleteParams {
     id: i64,
@@ -114,6 +118,7 @@ impl PandoTools {
     async fn task_create(
         &self,
         Parameters(body): Parameters<TaskCreateParams>,
+        Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         if body.text.trim().is_empty() {
             return Ok(error_result("text must not be empty"));
@@ -142,6 +147,7 @@ impl PandoTools {
         };
 
         let default_status = Status::Open;
+        let mut transaction = begin_as(self.database_pool(), &parts, &body.source).await?;
         let result = sqlx::query_as::<_, Task>(
             "INSERT INTO tasks (text, status, priority, linked_subject, due_date, source, updated_by)
             VALUES ($1, $2, $3, $4, $5, $6, $6)
@@ -153,11 +159,14 @@ impl PandoTools {
         .bind(&body.linked_subject)
         .bind(due_date)
         .bind(&body.source)
-        .fetch_one(self.database_pool())
+        .fetch_one(&mut *transaction)
         .await;
 
         match result {
-            Ok(task) => Ok(CallToolResult::structured(json!(task))),
+            Ok(task) => {
+                commit(transaction).await?;
+                Ok(CallToolResult::structured(json!(task)))
+            }
             Err(sqlx::Error::Database(db_err))
                 if db_err.is_foreign_key_violation()
                     && db_err.constraint() == Some("tasks_linked_subject_fkey") =>
@@ -203,6 +212,7 @@ impl PandoTools {
     async fn task_update(
         &self,
         Parameters(body): Parameters<TaskUpdateParams>,
+        Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         if body.status.is_none()
             && body.priority.is_none()
@@ -238,6 +248,7 @@ impl PandoTools {
             None => None,
         };
 
+        let mut transaction = begin_as(self.database_pool(), &parts, &body.updated_by).await?;
         let result = sqlx::query_as::<_, Task>(
             "UPDATE tasks
             SET status = COALESCE($2, status),
@@ -256,11 +267,14 @@ impl PandoTools {
         .bind(due_date)
         .bind(&body.text)
         .bind(&body.updated_by)
-        .fetch_optional(self.database_pool())
+        .fetch_optional(&mut *transaction)
         .await;
 
         match result {
-            Ok(Some(task)) => Ok(CallToolResult::structured(json!(task))),
+            Ok(Some(task)) => {
+                commit(transaction).await?;
+                Ok(CallToolResult::structured(json!(task)))
+            }
             Ok(None) => Ok(error_result(format!("task {} does not exist", body.id))),
             Err(error) => Err(db_error("failed to update task", error)),
         }
@@ -270,11 +284,13 @@ impl PandoTools {
     async fn task_complete(
         &self,
         Parameters(body): Parameters<TaskCompleteParams>,
+        Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
         if let Err(response) = validate_status(self.database_pool(), body.id).await? {
             return Ok(response);
         }
 
+        let mut transaction = begin_as(self.database_pool(), &parts, &body.updated_by).await?;
         let result = sqlx::query_as::<_, Task>(
             "UPDATE tasks
             SET status = 'done',
@@ -286,11 +302,14 @@ impl PandoTools {
         )
         .bind(body.id)
         .bind(&body.updated_by)
-        .fetch_optional(self.database_pool())
+        .fetch_optional(&mut *transaction)
         .await;
 
         match result {
-            Ok(Some(task)) => Ok(CallToolResult::structured(json!(task))),
+            Ok(Some(task)) => {
+                commit(transaction).await?;
+                Ok(CallToolResult::structured(json!(task)))
+            }
             Ok(None) => Ok(error_result(format!("task {} does not exist", body.id))),
             Err(error) => Err(db_error("failed to complete task", error)),
         }
@@ -300,10 +319,12 @@ impl PandoTools {
     async fn task_delete(
         &self,
         Parameters(body): Parameters<TaskDeleteParams>,
+        Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
+        let mut transaction = begin_as(self.database_pool(), &parts, &body.updated_by).await?;
         let result = sqlx::query("DELETE FROM tasks WHERE id = $1")
             .bind(body.id)
-            .execute(self.database_pool())
+            .execute(&mut *transaction)
             .await;
 
         let deleted = match result {
@@ -314,6 +335,8 @@ impl PandoTools {
         if deleted.rows_affected() == 0 {
             return Ok(error_result(format!("task {} does not exist", body.id)));
         }
+
+        commit(transaction).await?;
 
         Ok(CallToolResult::structured(
             json!({ "deleted": { "id": body.id } }),

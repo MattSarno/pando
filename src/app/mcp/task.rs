@@ -14,7 +14,7 @@ use rmcp::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
+use sqlx::PgExecutor;
 use sqlx::types::time::{Date, OffsetDateTime};
 use time::format_description::well_known::Iso8601;
 
@@ -98,16 +98,18 @@ struct TaskDeleteParams {
     updated_by: String,
 }
 
-async fn validate_status(pool: &PgPool, id: i64) -> Result<Result<(), CallToolResult>, ErrorData> {
+async fn unmatched_task(
+    executor: impl PgExecutor<'_>,
+    id: i64,
+) -> Result<CallToolResult, ErrorData> {
     let status = sqlx::query_scalar::<_, Status>("SELECT status FROM tasks WHERE id = $1")
         .bind(id)
-        .fetch_optional(pool)
+        .fetch_optional(executor)
         .await;
 
     match status {
-        Ok(None) => Ok(Err(error_result(format!("task {id} does not exist")))),
-        Ok(Some(Status::Done)) => Ok(Err(error_result(format!("task {id} is already done")))),
-        Ok(Some(_)) => Ok(Ok(())),
+        Ok(Some(Status::Done)) => Ok(error_result(format!("task {id} is already done"))),
+        Ok(_) => Ok(error_result(format!("task {id} does not exist"))),
         Err(error) => Err(db_error("failed to look up task", error)),
     }
 }
@@ -230,12 +232,6 @@ impl PandoTools {
             return Ok(error_result("text must not be empty"));
         }
 
-        if body.status.is_some()
-            && let Err(response) = validate_status(self.database_pool(), body.id).await?
-        {
-            return Ok(response);
-        }
-
         let due_date_provided = body.due_date.is_some();
         let due_date = match body.due_date.as_deref() {
             Some("") => None,
@@ -258,6 +254,7 @@ impl PandoTools {
                 updated_at = now(),
                 updated_by = $7
             WHERE id = $1
+              AND ($2::text IS NULL OR status <> 'done')
             RETURNING *",
         )
         .bind(body.id)
@@ -275,7 +272,7 @@ impl PandoTools {
                 commit(transaction).await?;
                 Ok(CallToolResult::structured(json!(task)))
             }
-            Ok(None) => Ok(error_result(format!("task {} does not exist", body.id))),
+            Ok(None) => unmatched_task(&mut *transaction, body.id).await,
             Err(error) => Err(db_error("failed to update task", error)),
         }
     }
@@ -286,10 +283,6 @@ impl PandoTools {
         Parameters(body): Parameters<TaskCompleteParams>,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        if let Err(response) = validate_status(self.database_pool(), body.id).await? {
-            return Ok(response);
-        }
-
         let mut transaction = begin_as(self.database_pool(), &parts, &body.updated_by).await?;
         let result = sqlx::query_as::<_, Task>(
             "UPDATE tasks
@@ -298,6 +291,7 @@ impl PandoTools {
                 updated_at = now(),
                 updated_by = $2
             WHERE id = $1
+              AND status <> 'done'
             RETURNING *",
         )
         .bind(body.id)
@@ -310,7 +304,7 @@ impl PandoTools {
                 commit(transaction).await?;
                 Ok(CallToolResult::structured(json!(task)))
             }
-            Ok(None) => Ok(error_result(format!("task {} does not exist", body.id))),
+            Ok(None) => unmatched_task(&mut *transaction, body.id).await,
             Err(error) => Err(db_error("failed to complete task", error)),
         }
     }
